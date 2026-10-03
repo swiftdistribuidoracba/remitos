@@ -210,9 +210,10 @@ details summary{cursor:pointer;color:var(--muted);font-size:14px}
         <p id="fotomsg" class="hint" hidden></p>
       </div>
       <div id="p-lec" class="panel" hidden>
-        <p class="hint">Conectá el receptor USB del lector al celular (con adaptador OTG). Tocá el recuadro y disparale al código de barras de cada caja: se agregan solas.</p>
+        <p class="hint">Conectá el receptor USB del lector al celular (con adaptador OTG). Tocá el recuadro y disparale al código de barras de cada caja: se agregan solas. <b>Cajas Swift: apuntá al código chico de abajo de ENFRIADO / CONGELADO</b> (el que tiene los números 25…); los otros no traen el peso.</p>
         <input id="lec" class="scanbox" inputmode="none" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Tocá acá y escaneá…" aria-label="Lectura del escáner">
         <p id="lecmsg" class="hint" aria-live="polite"></p>
+        <div id="lecraros" hidden><p class="hint" style="margin:6px 0 2px"><b>Lecturas no reconocidas</b> (sacale captura a esta lista y mandásela a Claude):</p><ol id="lecrlist" style="margin:0;padding-left:20px;font:13px/1.4 ui-monospace,monospace;word-break:break-all"></ol><button class="btn ghost small" id="lecrclr" style="margin-top:6px">Borrar lista</button></div>
       </div>
       <div id="p-kg" class="panel" hidden>
         <p class="hint">Tocá el corte y escribí el PESO NETO de la etiqueta. Para la próxima caja del mismo corte, solo escribí los kilos.</p>
@@ -309,7 +310,7 @@ const PRODUCTOS={
  "100010655":"CARNAZA PALETA NAC ENF","100010004":"COLITA CUADRIL NAC ENF","100523041":"CORAZON CUADRIL PUL ENF","100010103":"CUADRADA NAC ENF",
  "100522266":"CUADRADA PUL ENF","100011563":"CUADRADA FETEADA NAC ENF","100010689":"ENTRAÑA NAC ENF","100517635":"LOMO NAC ENF",
  "100523040":"LOMO PUL ENF","100517143":"MATAMBRE BLACK CONG","100520272":"MATAMBRE BLACK CONG","100010546":"MATAMBRE NAC ENF","100012915":"MATAMBRE CONG",
- "100016121":"MOLLEJA CONG","100016120":"MOLLEJA CORAZON CONG","100522741":"NALGA C/T PUL ENF","100523042":"NALGA S/T PUL ENF",
+ "100016121":"MOLLEJA CONG","100016120":"MOLLEJA CORAZON CONG","100522741":"NALGA C/T PUL ENF","100523042":"NALGA S/T PUL ENF","100523300":"COLITA CUADRIL PUL ENF",
  "100012202":"NALGA S/T NAC ENF","100522265":"PECETO PUL ENF","100523153":"PECHO PUL ENF","100523149":"AGUJA PUL ENF",
  "100010818":"ROAST BEEF NAC ENF","100010839":"TAPA DE ASADO NAC ENF","100010001":"VACÍO NAC ENF","100517915":"CARNE PICADA","100013155":"VACÍO L ENF","100010432":"VACÍO NAC CONG"};
 const $=id=>document.getElementById(id);
@@ -331,19 +332,45 @@ $('tab-nuevo').onclick=()=>tab('nuevo');$('tab-hist').onclick=()=>tab('hist');
 
 // ---- escaneo
 // Códigos de otros frigoríficos que equivalen a un corte de la lista
-const EQUIV={'94096':'100523042','53536':'100522741','94085':'100523039'}; // Brasil: 94096 = NALGA S/T PUL ENF · 53536 = NALGA C/T PUL ENF · 94085 BIFE ANGOSTO (bife de chorizo) VP = BIFE ANGOSTO PUL ENF
+const EQUIV={'94088':'100523300','94096':'100523042','53536':'100522741','94085':'100523039'}; // Brasil: 94088 = COLITA CUADRIL PUL ENF · 94096 = NALGA S/T PUL ENF · 53536 = NALGA C/T PUL ENF · 94085 BIFE ANGOSTO (bife de chorizo) VP = BIFE ANGOSTO PUL ENF
 function parse(raw){
-  const s=String(raw).replace(/\D/g,'');
-  // Swift Argentina: 25 + código (9) + peso neto en gramos (5)
-  if(s.length===16&&s.startsWith('25')&&s.slice(2).startsWith('100')){
-    const code=s.slice(2,11), kg=parseInt(s.slice(11),10)/1000;
-    return kg?{raw:s,code,kg:Math.round(kg*1000)/1000}:null}
-  // Brasil (etiqueta "PESO NETO (kg)", 46 dígitos): 28 + … + caja (5) + producto (5) + 01 + peso neto en centésimos (5) + fecha embalaje (8) + … + tara (6)
-  if(s.length===46&&s.startsWith('28')){
-    const prod=s.slice(17,22), kg=parseInt(s.slice(24,29),10)/100;
-    if(!(kg>0&&kg<100))return null;
-    return {raw:s,code:EQUIV[prod]||prod,kg:Math.round(kg*100)/100,origenCod:prod}}
+  // sacar el prefijo de símbolo que agregan algunos lectores (]C1, ]d2, ]Q3, ]e0…) antes de quedarnos con los números
+  const s=String(raw).replace(/^\s*\][A-Za-z]\d/,'').replace(/\D/g,'');
+  if(!s)return null;
+  // Swift: código grande de arriba / código vertical (C + 15 números + código del corte). Trae el corte pero NO el peso
+  const sw=String(raw).replace(/^\s*\][A-Za-z]\d/,'').trim().match(/^[Cc](\d{10,18})(100\d{6})$/);
+  if(sw)return {raw:'C'+sw[1]+sw[2],code:sw[2],kg:0,sinPeso:true};
+  // 1) Swift Argentina: 25 + código (9, empieza con 100) + peso neto en gramos (5). Se busca aunque venga con números de más
+  let m=s.length===16?s.match(/^25(100\d{6})(\d{5})$/):null;
+  if(!m)m=s.match(/25(100\d{6})(\d{5})/);
+  if(m){const kg=parseInt(m[2],10)/1000;if(kg>0&&kg<100)return {raw:s,code:m[1],kg:Math.round(kg*1000)/1000}}
+  // 2) Brasil (etiqueta "PESO NETO (kg)", 46 dígitos): 28 + … + caja (5) + producto (5) + 01 + peso neto en centésimos (5) + fecha (8) + … + tara (6)
+  // 46 dígitos (Nalga, Bife) o 48 (Colita: tara más larga); producto y peso siempre en la misma posición
+  const br=t=>{if(t.length<44||t.length>50||!t.startsWith('28'))return null;const prod=t.slice(17,22),kg=parseInt(t.slice(24,29),10)/100;
+    return kg>0&&kg<100?{raw:t,code:EQUIV[prod]||prod,kg:Math.round(kg*100)/100,origenCod:prod}:null};
+  let b=br(s);if(b)return b;
+  for(let i=1;i<=3&&!b;i++)b=br(s.slice(i));   // lector que agrega 1–3 números al principio
+  if(b)return b;
+  // 3) GS1-128 (estándar internacional): (01) GTIN 14 + (310x) peso neto kg con x decimales
+  const g=gs1(String(raw));
+  if(g&&g.kg){const prod=g.gtin.slice(-6,-1);return {raw:s,code:EQUIV[g.gtin]||EQUIV[prod]||g.gtin,kg:g.kg,origenCod:g.gtin}}
   return null;
+}
+// lee los campos GS1 más comunes; acepta separador de grupo (GS) o paréntesis
+function gs1(txt){
+  let t=String(txt).replace(/^\s*\][A-Za-z]\d/,'').replace(/[()]/g,'').replace(/\x1d/g,'|').replace(/[^\d|A-Za-z]/g,'');
+  const fijos={'00':18,'01':14,'02':14,'11':6,'12':6,'13':6,'15':6,'16':6,'17':6,'20':2};
+  const out={};let i=0,vueltas=0;
+  while(i<t.length&&vueltas++<20){
+    if(t[i]==='|'){i++;continue}
+    const ai2=t.slice(i,i+2),ai4=t.slice(i,i+4);
+    if(fijos[ai2]){const v=t.slice(i+2,i+2+fijos[ai2]);if(v.length<fijos[ai2])break;if(ai2==='01'||ai2==='02')out.gtin=v;i+=2+fijos[ai2];continue}
+    if(/^3[12]0\d$/.test(ai4)){const v=t.slice(i+4,i+10);if(!/^\d{6}$/.test(v))break;let kg=parseInt(v,10)/Math.pow(10,+ai4[3]);if(ai4[1]==='2')kg=kg*0.45359237;
+      if(!out.kg&&kg>0&&kg<100)out.kg=Math.round(kg*1000)/1000;i+=10;continue}
+    if(/^3\d\d\d$/.test(ai4)){i+=10;continue}
+    if(['10','21','22','90','91','92','93','94','95','96','97','98','99'].includes(ai2)){const j=t.indexOf('|',i+2);i=j<0?t.length:j;continue}
+    break}
+  return out.gtin?out:null;
 }
 function addRaw(txt){
   let bad=0,ok=0;
@@ -357,23 +384,43 @@ function modo(m){if(!['kg','lec'].includes(m))m='foto';['foto','kg','lec'].forEa
 $('m-foto').onclick=()=>modo('foto');$('m-kg').onclick=()=>modo('kg');$('m-lec').onclick=()=>modo('lec');
 // ---- lector de códigos (Gadnic u otro que funcione como teclado)
 function lecMsg(t,ok){const m=$('lecmsg');m.textContent=t;m.style.color=ok?'var(--ok)':'var(--warn)'}
+let lecRaros=[];try{lecRaros=JSON.parse(localStorage.getItem('lecRaros')||'[]')}catch(_){}
+function verRaros(){const box=$('lecraros');if(!box)return;box.hidden=!lecRaros.length;$('lecrlist').innerHTML=lecRaros.map(r=>`<li>${r.t.replace(/[<>&]/g,'')}<br><span style="color:var(--muted)">${r.n} números · ${r.h}</span></li>`).join('')}
 function procesarLectura(txt){
-  const s=String(txt).replace(/\D/g,'');if(!s)return;
-  const p=parse(s);
-  if(!p){lecMsg(s.length<12?'Lectura incompleta, volvé a escanear.':'Ese código no es el de peso de la caja ('+s.slice(0,20)+(s.length>20?'…':'')+'). Escaneá el código de barras con los kilos.',false);try{navigator.vibrate&&navigator.vibrate([60,60,60])}catch(_){}return}
+  const crudo=String(txt).replace(/\x1d/g,'|').trim();const s=crudo.replace(/\D/g,'');if(!s)return;
+  const p=parse(String(txt));
+  if(!p){
+    if(s.length>=8){lecRaros.unshift({t:crudo,n:s.length,h:new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})});lecRaros=lecRaros.slice(0,8);try{localStorage.setItem('lecRaros',JSON.stringify(lecRaros))}catch(_){}verRaros()}
+    lecMsg(s.length<12?'Lectura incompleta, volvé a escanear.':'No reconozco este código ('+s.length+' números). Probá con otro código de barras de la misma etiqueta; si ninguno anda, mandale a Claude la lista de abajo.',false);try{navigator.vibrate&&navigator.vibrate([60,60,60])}catch(_){}return}
+  if(p.sinPeso){pedirKgLector(p);return}
   if(cajas.some(c=>c.raw===p.raw)){lecMsg('Esa caja ya estaba cargada: '+(PRODUCTOS[p.code]||p.code)+' · '+fkg3(p.kg)+' kg.',false);return}
   cajas.push({...p,origen:'lector',dup:false});render();
-  lecMsg('✓ '+(PRODUCTOS[p.code]||('Código nuevo '+p.code))+' · '+fkg3(p.kg)+' kg  ('+cajas.length+' caja'+(cajas.length>1?'s':'')+')',true);
+  lecMsg('✓ '+(PRODUCTOS[p.code]||('Código nuevo '+p.code+' (elegí el corte abajo)'))+' · '+fkg3(p.kg)+' kg  ('+cajas.length+' caja'+(cajas.length>1?'s':'')+')',true);
   try{navigator.vibrate&&navigator.vibrate(60)}catch(_){}
 }
+// el lector leyó el código grande de la etiqueta Swift (sin peso): se pide el PESO NETO a mano
+async function pedirKgLector(p){
+  if(cajas.some(c=>c.raw===p.raw)){lecMsg('Esa caja ya estaba cargada: '+(PRODUCTOS[p.code]||p.code)+'.',false);return}
+  try{navigator.vibrate&&navigator.vibrate([40,40])}catch(_){}
+  const inp=$('dlg-in');inp.inputMode='decimal';
+  const v=await preguntar({titulo:PRODUCTOS[p.code]||('Código '+p.code),texto:'Leíste el código grande, que no trae el peso. Escribí el PESO NETO de la etiqueta.\nLa próxima vez apuntá al código chico de abajo de ENFRIADO / CONGELADO: ese carga los kilos solo.',input:'Peso neto (ej: 21,547)',si:'Agregar'});
+  inp.inputMode='';setTimeout(()=>$('lec').focus(),50);
+  if(v===null||v===undefined)return;
+  const kg=parseFloat(String(v).replace(/\./g,'').replace(',','.'))||parseFloat(String(v));
+  if(!(kg>0&&kg<100)){lecMsg('Peso no válido, volvé a escanear la caja.',false);return}
+  const q={raw:p.raw,code:p.code,kg:Math.round(kg*1000)/1000};
+  cajas.push({...q,origen:'lector',dup:false});render();
+  lecMsg('✓ '+(PRODUCTOS[q.code]||('Código nuevo '+q.code))+' · '+fkg3(q.kg)+' kg  ('+cajas.length+' caja'+(cajas.length>1?'s':'')+')',true);
+}
+$('lecrclr').onclick=()=>{lecRaros=[];try{localStorage.removeItem('lecRaros')}catch(_){}verRaros()};verRaros();
 let lecT=null;
 // si el lector dispara sin que el recuadro tenga el foco, igual se captura
 document.addEventListener('keydown',e=>{if($('p-lec').hidden)return;const t=e.target;if(t===$('lec')||/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))return;
-  if(/^[0-9]$/.test(e.key)){e.preventDefault();$('lec').focus();$('lec').value+=e.key;$('lec').dispatchEvent(new Event('input'))}
+  if(/^[0-9A-Za-z()\]]$/.test(e.key)){e.preventDefault();$('lec').focus();$('lec').value+=e.key;$('lec').dispatchEvent(new Event('input'))}
   else if(e.key==='Enter'&&$('lec').value){e.preventDefault();const v=$('lec').value;$('lec').value='';procesarLectura(v)}});
 $('lec').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key==='Tab'){e.preventDefault();clearTimeout(lecT);const v=$('lec').value;$('lec').value='';procesarLectura(v)}});
 // por si el lector no manda Enter al final: procesa cuando deja de escribir
-$('lec').addEventListener('input',()=>{clearTimeout(lecT);lecT=setTimeout(()=>{const v=$('lec').value;if(v.replace(/\D/g,'').length>=16){$('lec').value='';procesarLectura(v)}},300)});
+$('lec').addEventListener('input',()=>{clearTimeout(lecT);lecT=setTimeout(()=>{const v=$('lec').value;if(v.replace(/\D/g,'').length>=16){$('lec').value='';procesarLectura(v)}},600)});
 
 // ---- corte + kilos a mano
 let corteSel=null,todos=false;

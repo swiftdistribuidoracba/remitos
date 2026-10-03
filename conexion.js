@@ -2,13 +2,33 @@
 // Misma interfaz que usaba la app (claude.use('db') / 'downloads'), así el resto del código no cambia.
 (function(){
   const API='https://script.google.com/macros/s/AKfycbxtk5PNEniHdvozU1Ncz2S_r6fBe-uF5J1sQjS4x73WuBzUc2ln7t45Y_eLzfz3KAnU/exec';
-  const CLAVE='OBMX3lku3n1vCM1nzPuuiCjI';
   const ls={get:k=>{try{return JSON.parse(localStorage.getItem(k)||'null')}catch(_){return null}},set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(_){}}};
 
+  // ---- clave de acceso: se escribe una vez por celular y queda guardada (no está en el código publicado)
+  const clave=()=>ls.get('swift_clave')||'';
+  function pedirClave(mal){
+    if(document.getElementById('acceso'))return;
+    const d=document.createElement('div');d.id='acceso';
+    d.innerHTML=`<div class="acc-box"><img src="icon-192.png" alt="" width="72" height="72"><h2>Remitos Swift</h2>
+      <p>${mal&&clave()?'La clave no es correcta.':'Escribí la clave de acceso.'} Se pide una sola vez en este equipo.</p>
+      <input id="acc-in" type="password" autocomplete="current-password" placeholder="Clave de acceso"><button id="acc-ok">Entrar</button><p id="acc-msg"></p></div>`;
+    document.body.appendChild(d);
+    const ir=async()=>{const v=document.getElementById('acc-in').value.trim();if(!v)return;document.getElementById('acc-msg').textContent='Verificando…';
+      ls.set('swift_clave',v);
+      try{await bajar();d.remove();subir()}catch(e){document.getElementById('acc-msg').textContent=e&&e.message==='clave incorrecta'?'Clave incorrecta.':'No se pudo verificar (¿hay señal?).'}};
+    document.getElementById('acc-ok').onclick=ir;document.getElementById('acc-in').onkeydown=e=>{if(e.key==='Enter')ir()};setTimeout(()=>document.getElementById('acc-in').focus(),100)}
+  const st=document.createElement('style');st.textContent=`#acceso{position:fixed;inset:0;z-index:100;background:var(--bg,#f7f6f6);display:flex;align-items:center;justify-content:center;padding:20px}
+  #acceso .acc-box{max-width:340px;width:100%;text-align:center;display:flex;flex-direction:column;gap:12px;align-items:center}
+  #acceso h2{margin:0;font:700 26px "Barlow Condensed",Arial,sans-serif;color:var(--brand,#c8102e);text-transform:uppercase}
+  #acceso p{margin:0;color:var(--muted,#6f6566)}#acceso img{border-radius:16px}
+  #acceso input{width:100%;font-size:18px;padding:12px;border-radius:8px;border:1px solid var(--line,#ddd);background:var(--card,#fff);color:var(--ink,#222)}
+  #acceso button{width:100%;font-size:18px;padding:12px;border:0;border-radius:8px;background:var(--brand,#c8102e);color:#fff;font-weight:700}`;document.head.appendChild(st);
+
   async function api(accion,extra){
-    const r=await fetch(API,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(Object.assign({clave:CLAVE,accion},extra||{})),redirect:'follow'});
+    if(!clave()){pedirClave(false);throw {code:'sin_clave',message:'falta la clave'}}
+    const r=await fetch(API,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(Object.assign({clave:clave(),accion},extra||{})),redirect:'follow'});
     if(!r.ok)throw {code:'red',message:'HTTP '+r.status};
-    const j=await r.json(); if(!j.ok)throw {code:'servidor',message:j.error||'error'}; return j;
+    const j=await r.json(); if(!j.ok){if(j.error==='clave incorrecta'){pedirClave(true)}throw {code:'servidor',message:j.error||'error'}} return j;
   }
 
   // ---- datos en memoria (con copia en el teléfono para abrir sin señal)
