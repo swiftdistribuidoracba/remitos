@@ -832,7 +832,7 @@ function pdfRemito(d,numero,firma,doc){
   p.setDrawColor(...R);p.rect(111,y-5,25,7);
   y+=10;p.setFont('helvetica','bold');p.setFontSize(9);p.setTextColor(...R);p.text('RECIBÍ CONFORME',12,y);
   p.setFont('helvetica','normal');p.setTextColor(20);
-  if(firma)p.addImage(firma,'JPEG',12,y+2,60,20);else if(d.sinFirma){p.setTextColor(...R);p.setFont('helvetica','bold');p.setFontSize(9);p.text('PENDIENTE DE FIRMA',14,y+14);p.setFont('helvetica','normal');p.setTextColor(20)}
+  if(firma)p.addImage(firma,String(firma).startsWith('data:image/png')?'PNG':'JPEG',12,y+2,60,20);else if(d.sinFirma){p.setTextColor(...R);p.setFont('helvetica','bold');p.setFontSize(9);p.text('PENDIENTE DE FIRMA',14,y+14);p.setFont('helvetica','normal');p.setTextColor(20)}
   p.line(12,y+23,72,y+23);p.setFontSize(8);p.text('Firma',12,y+27);
   p.text('Aclaración: '+(d.recibe||''),78,y+12);p.text('DNI: '+(d.dni||''),78,y+19);
   // observaciones: siempre salen los datos para el pago (OBS_PAGO) y abajo lo que se escriba a mano
