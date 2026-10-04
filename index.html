@@ -925,7 +925,7 @@ async function guardarRemito(conFirma){
 $('guardar').onclick=()=>guardarRemito(true);
 $('guardarSF').onclick=async()=>{if(firmado&&!await preguntar({titulo:'Hay una firma dibujada',texto:'¿Guardar el remito con esa firma?',si:'Guardar con firma'}))return;guardarRemito(false)};
 $('pdf').onclick=async()=>{const d=datosRemito();const err=validar(d,false);if(err){flash(err,true);return}await mostrarRemito(d,guardadoId||'BORRADOR',firmado?firmaPNG():null)};
-$('nuevo').onclick=()=>{salirCorreccion();cajas=[];$('lecmsg').textContent='';$('fotolog').innerHTML='';$('fotomsg').hidden=true;$('fotolog').hidden=true;$('kg').value='';corteSel=null;renderChips();$('rv').hidden=true;guardadoId=null;$('recibe').value='';$('dni').value='';$('obs').value='';$('borrarFirma').click();$('fecha').value=hoy();render();window.scrollTo({top:0})};
+$('nuevo').onclick=()=>{salirCorreccion();cajas=[];$('cliente').value='';showCliente();precios={};$('lecmsg').textContent='';$('fotolog').innerHTML='';$('fotomsg').hidden=true;$('fotolog').hidden=true;$('kg').value='';corteSel=null;renderChips();$('rv').hidden=true;guardadoId=null;$('recibe').value='';$('dni').value='';$('obs').value='';$('borrarFirma').click();$('fecha').value=hoy();render();window.scrollTo({top:0})};
 
 // ---- historial
 function renderHist(){
@@ -1073,17 +1073,19 @@ function iniciarPedidos(){
   // leer el mensaje de WhatsApp
   const cortesN = CAT_PRODUCTOS.map(p => ({p, n:normN(p.name)})).sort((a,b) => b.n.length - a.n.length);
   function leerMensaje(txt){
+    // funciona con el mensaje en varios renglones o pegado todo en una sola línea
+    const t = String(txt).replace(/\u00a0/g, " ").replace(/\*/g, "");
     let name = "", items = [], raros = [];
-    String(txt).split(/\r?\n/).forEach(l0 => {
-      const l = l0.replace(/^\s*\[[^\]]*\]\s*[^:]*:\s*(?=\*?Pedido|Cliente|[-•])/i, "").trim();
-      const c = l.match(/^\*?cliente\*?\s*:\s*(.+)$/i); if (c){ name = c[1].replace(/\*/g,"").trim(); return; }
-      const m = l.match(/^[-•*]?\s*(.+?)\s*:\s*(\d+)\s*caja/i);
-      if (!m || /^total/i.test(m[1])) return;
+    const c = t.match(/cliente\s*:\s*(.+?)(?=\s+[-•]\s|\s+total\s*:|\r?\n|$)/i);
+    if (c) name = c[1].trim();
+    const re = /(?:^|\s)[-•]\s*([^:\n]+?)\s*:\s*(\d+)\s*caja/gi;
+    let m;
+    while ((m = re.exec(t))){
       const n = normN(m[1]); const hit = cortesN.find(x => x.n === n) || cortesN.find(x => n.includes(x.n));
       const q = parseInt(m[2], 10);
       if (hit && q > 0){ const ex = items.find(i => i.cut === hit.p.name); if (ex) ex.qty += q; else items.push({cut:hit.p.name, qty:q}); }
-      else raros.push(m[1]);
-    });
+      else raros.push(m[1].trim());
+    }
     return {name, items, raros};
   }
   $("ped-pegar").onclick = async () => {
