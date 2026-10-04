@@ -11,11 +11,11 @@
     const d=document.createElement('div');d.id='acceso';
     d.innerHTML=`<div class="acc-box"><img src="icon-192.png" alt="" width="72" height="72"><h2>Remitos Swift</h2>
       <p>${mal&&clave()?'La clave no es correcta.':'Escribí la clave de acceso.'} Se pide una sola vez en este equipo.</p>
-      <input id="acc-in" type="password" autocomplete="current-password" placeholder="Clave de acceso"><button id="acc-ok">Entrar</button><p id="acc-msg"></p></div>`;
+      <input id="acc-in" type="password" inputmode="numeric" autocomplete="current-password" placeholder="Clave de acceso"><button id="acc-ok">Entrar</button><p id="acc-msg"></p></div>`;
     document.body.appendChild(d);
     const ir=async()=>{const v=document.getElementById('acc-in').value.trim();if(!v)return;document.getElementById('acc-msg').textContent='Verificando…';
       ls.set('swift_clave',v);
-      try{await bajar();d.remove();subir()}catch(e){document.getElementById('acc-msg').textContent=e&&e.message==='clave incorrecta'?'Clave incorrecta.':'No se pudo verificar (¿hay señal?).'}};
+      try{await bajar();d.remove();subir()}catch(e){document.getElementById('acc-msg').textContent=e&&e.message==='clave incorrecta'?'Clave incorrecta.':(e&&/intentos/.test(e.message)?'Demasiados intentos. Probá en una hora.':'No se pudo verificar (¿hay señal?).')}};
     document.getElementById('acc-ok').onclick=ir;document.getElementById('acc-in').onkeydown=e=>{if(e.key==='Enter')ir()};setTimeout(()=>document.getElementById('acc-in').focus(),100)}
   const st=document.createElement('style');st.textContent=`#acceso{position:fixed;inset:0;z-index:100;background:var(--bg,#f7f6f6);display:flex;align-items:center;justify-content:center;padding:20px}
   #acceso .acc-box{max-width:340px;width:100%;text-align:center;display:flex;flex-direction:column;gap:12px;align-items:center}

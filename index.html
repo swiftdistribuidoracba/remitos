@@ -1181,5 +1181,201 @@ function iniciarPedidos(){
 iniciarPedidos();
 </script>
 
+<style>
+/* resumen (ventas) */
+:root{--chart:#c8102e}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--chart:#f2465b}}
+:root[data-theme="dark"]{--chart:#f2465b}
+.res-chips{display:flex;gap:8px;flex-wrap:wrap}
+.res-chip{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;padding:8px 14px;font:600 15px var(--f-body)}
+.res-chip[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.res-tiles{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.res-tile{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--card);display:flex;flex-direction:column;gap:2px}
+.res-tile .k{font-size:13px;color:var(--muted)}
+.res-tile .v{font:700 24px/1.1 var(--f-display);white-space:nowrap;color:var(--ink);font-variant-numeric:tabular-nums}
+.res-tile.alerta{border-color:var(--warn);background:var(--warn-soft)}
+.res-tile.alerta .v{color:var(--ink)}
+.res-tile button{align-self:flex-start;margin-top:4px}
+.res-h{font:700 18px var(--f-display);margin:0;text-transform:uppercase;letter-spacing:.02em}
+.res-sub{font-size:13px;color:var(--muted);margin:0}
+.res-chart{position:relative}
+.res-chart svg{display:block;width:100%;height:auto;overflow:visible}
+.res-chart text{font-family:var(--f-body);fill:var(--muted);font-size:12px}
+.res-chart text.val{fill:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+.res-chart text.lab{fill:var(--ink)}
+.res-chart .grid{stroke:var(--line);stroke-width:1}
+.res-chart .bar{fill:var(--chart)}
+.res-chart .hit{fill:transparent;cursor:pointer}
+.res-chart g.on .bar{opacity:1}
+.res-chart g.dim .bar{opacity:.35}
+.res-tip{position:absolute;pointer-events:none;background:var(--ink);color:var(--bg);border-radius:6px;padding:6px 9px;font:500 13px/1.3 var(--f-body);white-space:nowrap;transform:translate(-50%,-110%);z-index:2}
+.res-empty{color:var(--muted);font-size:15px;padding:8px 0}
+.res-tabla{width:100%;border-collapse:collapse;font-size:14px}
+.res-tabla td,.res-tabla th{padding:4px 6px;border-bottom:1px solid var(--line);text-align:left}
+.res-tabla td.n,.res-tabla th.n{text-align:right;font-variant-numeric:tabular-nums}
+.res-aviso[hidden],.ped-prog[hidden]{display:none!important}
+.res-aviso{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid var(--warn);background:var(--warn-soft);color:var(--ink);border-radius:10px;padding:10px 12px;font-weight:600}
+</style>
+<script>
+// ================= RESUMEN DE VENTAS + AVISO DE REMITOS SIN FIRMAR =================
+(function(){
+  const esc = s => String(s==null?"":s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  const money = n => "$ " + Math.round(n).toLocaleString("es-AR");
+  const kgf = n => (Math.round(n*10)/10).toLocaleString("es-AR",{minimumFractionDigits:0,maximumFractionDigits:1});
+  const corto = n => n>=1e6 ? (Math.round(n/1e5)/10).toLocaleString("es-AR")+" M" : n>=1e3 ? Math.round(n/1e3)+" mil" : String(Math.round(n));
+  const isoLocal = d => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+  let periodo = "mes";
+  try{ periodo = localStorage.getItem("resPeriodo") || "mes"; }catch(_){}
+
+  // ---- aviso de remitos sin firmar (arriba del remito nuevo)
+  const aviso = document.createElement("div");
+  aviso.className = "res-aviso"; aviso.hidden = true; aviso.setAttribute("role","status");
+  $("view-nuevo").prepend(aviso);
+  function sinFirmar(){ return remitos.filter(r => !r.anulado && !r.firma); }
+  function renderAviso(){
+    const n = sinFirmar().length;
+    aviso.hidden = !n;
+    if (n) aviso.innerHTML = `<span>⚠ Tenés ${n} remito${n>1?"s":""} sin firmar</span><button class="btn small" id="aviso-ver">Ver</button>`;
+    const b = $("aviso-ver"); if (b) b.onclick = verSinFirmar;
+  }
+  function verSinFirmar(){ tab("hist"); ocultar(); setTimeout(() => { const el = document.querySelector("#hist .pill.warn"); if (el) el.scrollIntoView({block:"center"}); }, 50); }
+
+  // ---- pestaña Resumen
+  const tabRes = document.createElement("button");
+  tabRes.className = "tab"; tabRes.id = "tab-res"; tabRes.setAttribute("role","tab"); tabRes.setAttribute("aria-selected","false");
+  tabRes.textContent = "Resumen";
+  document.querySelector("header.top .tabs").append(tabRes);
+  const vista = document.createElement("div");
+  vista.id = "view-res"; vista.hidden = true;
+  vista.style.cssText = "display:flex;flex-direction:column;gap:14px";
+  vista.innerHTML = `<section class="card">
+      <div class="res-chips" role="group" aria-label="Período">
+        <button class="res-chip" data-p="hoy">Hoy</button><button class="res-chip" data-p="7d">Últimos 7 días</button><button class="res-chip" data-p="mes">Este mes</button>
+      </div>
+      <div class="res-tiles" id="res-tiles"></div>
+    </section>
+    <section class="card"><h2 class="res-h">Ventas por día</h2><p class="res-sub" id="res-dia-sub"></p><div class="res-chart" id="res-dia"></div></section>
+    <section class="card"><h2 class="res-h">Kilos por corte</h2><p class="res-sub">Los cortes que más salieron en el período.</p><div class="res-chart" id="res-cortes"></div></section>
+    <section class="card"><h2 class="res-h">Mejores clientes</h2><p class="res-sub">Total vendido a cada cliente en el período.</p><div class="res-chart" id="res-cli"></div></section>
+    <section class="card"><details><summary>Ver en tabla</summary><div id="res-tabla" style="margin-top:8px"></div></details></section>`;
+  $("view-hist").after(vista);
+  vista.style.display = "none";
+  function ocultar(){ vista.hidden = true; vista.style.display = "none"; tabRes.setAttribute("aria-selected","false"); }
+  function verRes(){
+    $("view-nuevo").hidden = true; $("view-nuevo").style.display = "none"; $("view-hist").hidden = true;
+    const vp = $("view-ped"); if (vp) vp.hidden = true;
+    const tp = $("tab-ped"); if (tp) tp.setAttribute("aria-selected","false");
+    vista.hidden = false; vista.style.display = "flex";
+    tabRes.setAttribute("aria-selected","true"); $("tab-nuevo").setAttribute("aria-selected","false"); $("tab-hist").setAttribute("aria-selected","false");
+    renderRes();
+  }
+  tabRes.onclick = verRes;
+  $("tab-nuevo").addEventListener("click", ocultar);
+  $("tab-hist").addEventListener("click", ocultar);
+  const tp = $("tab-ped"); if (tp) tp.addEventListener("click", ocultar);
+  vista.querySelectorAll(".res-chip").forEach(b => b.onclick = () => { periodo = b.dataset.p; try{ localStorage.setItem("resPeriodo", periodo); }catch(_){} renderRes(); });
+
+  function rango(){
+    const hoyD = new Date(); const fin = isoLocal(hoyD);
+    if (periodo === "hoy") return {desde:fin, hasta:fin, dias:[fin], txt:"hoy"};
+    const d0 = new Date(hoyD);
+    if (periodo === "7d") d0.setDate(d0.getDate()-6); else d0.setDate(1);
+    const dias = []; for (const d = new Date(d0); isoLocal(d) <= fin; d.setDate(d.getDate()+1)) dias.push(isoLocal(d));
+    return {desde:isoLocal(d0), hasta:fin, dias, txt: periodo==="7d" ? "en los últimos 7 días" : "este mes"};
+  }
+
+  // ---- gráfico de barras horizontales (una sola serie, valor escrito al final de cada barra)
+  function barrasH(box, filas, fmtVal){
+    if (!filas.length){ box.innerHTML = '<div class="res-empty">Sin datos en este período.</div>'; return; }
+    // nombre arriba, barra abajo: así los nombres largos de los cortes se leen completos
+    const W = 340, valW = 72, rowH = 40, barH = 14, max = Math.max(...filas.map(f => f.v)) || 1;
+    const H = filas.length * rowH, plot = W - valW;
+    let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(filas.map(f=>f.k+': '+fmtVal(f.v)).join(', '))}">`;
+    filas.forEach((f,i) => {
+      const y = i*rowH, w = Math.max(4, f.v/max*plot), by = y + 18;
+      s += `<g data-i="${i}"><text class="lab" x="0" y="${y+13}">${esc(f.k)}${f.extra?` <tspan fill="currentColor" style="fill:var(--muted)">· ${esc(f.extra)}</tspan>`:""}</text>`
+        + `<path class="bar" d="M0,${by} h${w-4} a4,4 0 0 1 4,4 v${barH-8} a4,4 0 0 1 -4,4 h${-(w-4)} z"/>`
+        + `<text class="val" x="${w+6}" y="${by+barH-3}">${esc(fmtVal(f.v))}</text>`
+        + `<rect class="hit" x="0" y="${y}" width="${W}" height="${rowH}"><title>${esc(f.k)}: ${esc(fmtVal(f.v))}${f.extra?' · '+esc(f.extra):''}</title></rect></g>`;
+    });
+    box.innerHTML = s + "</svg>";
+  }
+
+  // ---- columnas por día (una sola serie) con tooltip al tocar
+  function columnas(box, dias, valores){
+    const tot = valores.reduce((a,b)=>a+b,0);
+    if (!tot){ box.innerHTML = '<div class="res-empty">Sin ventas en este período.</div>'; return; }
+    const W = 340, H = 170, padL = 44, padB = 22, padT = 8, plotW = W-padL, plotH = H-padB-padT;
+    const max = Math.max(...valores); const paso = Math.pow(10, Math.floor(Math.log10(max))); const top = Math.ceil(max/paso)*paso;
+    const n = dias.length, slot = plotW/n, bw = Math.max(3, Math.min(22, slot-2));
+    let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Ventas por día">`;
+    [0, .5, 1].forEach(t => { const y = padT + plotH*(1-t); s += `<line class="grid" x1="${padL}" x2="${W}" y1="${y}" y2="${y}"/><text x="${padL-6}" y="${y+4}" text-anchor="end">${corto(top*t)}</text>`; });
+    const cada = n <= 7 ? 1 : n <= 16 ? 3 : 5;
+    dias.forEach((d,i) => {
+      const v = valores[i], h = v/top*plotH, x = padL + i*slot + (slot-bw)/2, y = padT + plotH - h;
+      const dd = d.slice(8,10).replace(/^0/,"");
+      s += `<g data-i="${i}">` + (v ? `<path class="bar" d="M${x},${padT+plotH} v${-(h-Math.min(4,h))} a${Math.min(4,h)},${Math.min(4,h)} 0 0 1 ${Math.min(4,bw/2)},${-Math.min(4,h)} h${bw-2*Math.min(4,bw/2)} a${Math.min(4,h)},${Math.min(4,h)} 0 0 1 ${Math.min(4,bw/2)},${Math.min(4,h)} v${h-Math.min(4,h)} z"/>` : "")
+        + ((i % cada === 0 || i === n-1) ? `<text x="${padL + i*slot + slot/2}" y="${H-6}" text-anchor="middle">${dd}</text>` : "")
+        + `<rect class="hit" x="${padL + i*slot}" y="${padT}" width="${slot}" height="${plotH+padB}"/></g>`;
+    });
+    box.innerHTML = s + "</svg>";
+    const tip = document.createElement("div"); tip.className = "res-tip"; tip.hidden = true; box.appendChild(tip);
+    const svg = box.querySelector("svg");
+    function mostrar(i){
+      const d = dias[i], v = valores[i];
+      const f = new Date(d+"T12:00:00").toLocaleDateString("es-AR",{weekday:"short",day:"numeric",month:"short"});
+      tip.textContent = `${f}: ${v ? money(v) : "sin ventas"}`; tip.hidden = false;
+      const r = svg.getBoundingClientRect(), k = r.width / W;
+      const x = (padL + i*slot + slot/2) * k, y = (padT + plotH - (v/top*plotH)) * k;
+      tip.style.left = Math.min(Math.max(x, 70), r.width-70) + "px"; tip.style.top = y + "px";
+      svg.querySelectorAll("g[data-i]").forEach(g => g.classList.toggle("dim", +g.dataset.i !== i));
+    }
+    svg.querySelectorAll("g[data-i]").forEach(g => { const i = +g.dataset.i; g.addEventListener("mouseenter", () => mostrar(i)); g.addEventListener("click", () => mostrar(i)); });
+    svg.addEventListener("mouseleave", () => { tip.hidden = true; svg.querySelectorAll("g").forEach(g => g.classList.remove("dim")); });
+  }
+
+  function renderRes(){
+    if (vista.hidden) return;
+    vista.querySelectorAll(".res-chip").forEach(b => b.setAttribute("aria-pressed", b.dataset.p === periodo));
+    const R = rango();
+    const lista = remitos.filter(r => !r.anulado && r.fecha >= R.desde && r.fecha <= R.hasta);
+    const total = lista.reduce((a,r) => a + (r.total||0), 0);
+    let kilos = 0; const porCorte = {}, porCli = {}, porDia = {};
+    lista.forEach(r => {
+      porDia[r.fecha] = (porDia[r.fecha]||0) + (r.total||0);
+      const cn = (r.cliente && r.cliente.nombre) || "Sin cliente";
+      porCli[cn] = porCli[cn] || {v:0, n:0}; porCli[cn].v += (r.total||0); porCli[cn].n++;
+      (r.items||[]).forEach(it => { const k = it.nombre || it.code || "?"; porCorte[k] = porCorte[k] || {v:0, c:0}; porCorte[k].v += (+it.kg||0); porCorte[k].c += (+it.cajas||0); kilos += (+it.kg||0); });
+    });
+    const nSin = sinFirmar().length;
+    $("res-tiles").innerHTML =
+        `<div class="res-tile"><span class="k">Vendido ${R.txt}</span><span class="v">${money(total)}</span></div>`
+      + `<div class="res-tile"><span class="k">Kilos</span><span class="v">${kgf(kilos)} kg</span></div>`
+      + `<div class="res-tile"><span class="k">Remitos</span><span class="v">${lista.length}</span></div>`
+      + `<div class="res-tile${nSin?" alerta":""}"><span class="k">${nSin?"⚠ ":""}Sin firmar (todos)</span><span class="v">${nSin}</span>${nSin?'<button class="btn small" id="res-verfir">Ver</button>':""}</div>`;
+    const bf = $("res-verfir"); if (bf) bf.onclick = verSinFirmar;
+
+    const diaBox = $("res-dia");
+    if (periodo === "hoy"){ $("res-dia-sub").textContent = "Elegí 7 días o Este mes para ver la evolución."; diaBox.innerHTML = ""; }
+    else { $("res-dia-sub").textContent = "Tocá una barra para ver el monto de ese día."; columnas(diaBox, R.dias, R.dias.map(d => porDia[d]||0)); }
+
+    const cortes = Object.entries(porCorte).map(([k,o]) => ({k, v:o.v, extra: o.c ? o.c+" caja"+(o.c>1?"s":"") : ""})).sort((a,b) => b.v-a.v);
+    const topC = cortes.slice(0,8);
+    if (cortes.length > 8) topC.push({k:"Otros", v: cortes.slice(8).reduce((a,b)=>a+b.v,0)});
+    barrasH($("res-cortes"), topC, v => kgf(v)+" kg");
+    const clis = Object.entries(porCli).map(([k,o]) => ({k, v:o.v, extra: o.n+" remito"+(o.n>1?"s":"")})).sort((a,b) => b.v-a.v).slice(0,6);
+    barrasH($("res-cli"), clis, v => corto(v));
+
+    $("res-tabla").innerHTML = lista.length ? `<table class="res-tabla"><thead><tr><th>Corte</th><th class="n">Kg</th><th class="n">Cajas</th></tr></thead><tbody>${cortes.map(c => `<tr><td>${esc(c.k)}</td><td class="n">${kgf(c.v)}</td><td class="n">${esc((c.extra||"").replace(/\D/g,""))}</td></tr>`).join("")}</tbody></table>
+      <table class="res-tabla" style="margin-top:10px"><thead><tr><th>Cliente</th><th class="n">Remitos</th><th class="n">Total</th></tr></thead><tbody>${Object.entries(porCli).sort((a,b)=>b[1].v-a[1].v).map(([k,o]) => `<tr><td>${esc(k)}</td><td class="n">${o.n}</td><td class="n">${money(o.v)}</td></tr>`).join("")}</tbody></table>` : '<div class="res-empty">Sin datos en este período.</div>';
+  }
+
+  // actualizar cuando cambian los remitos
+  const _rh = renderHist;
+  renderHist = function(){ _rh(); try{ renderAviso(); renderRes(); }catch(e){ console.error(e); } };
+  renderAviso();
+})();
+</script>
+
 <script>if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));</script>
 </body></html>
