@@ -32,7 +32,8 @@
   }
 
   // ---- datos en memoria (con copia en el teléfono para abrir sin señal)
-  let S=ls.get('swift_cache')||{clientes:{},productos:{},costos:{},remitos:{},meta:{contador:{n:0},lista:{precios:{}}}};
+  let S=ls.get('swift_cache')||{clientes:{},productos:{},costos:{},remitos:{},pedidos:{},meta:{contador:{n:0},lista:{precios:{}},pedidoClientes:{mapa:{}}}};
+  S.pedidos=S.pedidos||{};S.meta.pedidoClientes=S.meta.pedidoClientes||{mapa:{}};
   let cola=ls.get('swift_cola')||[];            // cambios pendientes de subir
   const guardarCache=()=>ls.set('swift_cache',S), guardarCola=()=>{ls.set('swift_cola',cola);estado()};
   const subs=[];                                // {tipo:'col'|'doc', ruta, fn}
@@ -49,8 +50,8 @@
     // lo que todavía está en la cola manda sobre lo que vino de la planilla
     const pend={};cola.forEach(op=>{pend[op.col+'/'+op.id]=op});
     const mezcla=(col,nuevo)=>{const out=Object.assign({},nuevo);Object.keys(pend).forEach(k=>{const [c,id]=k.split('/');if(c!==col)return;const op=pend[k];if(op.tipo==='borrar')delete out[id];else out[id]=op.datos});return out};
-    S={clientes:mezcla('clientes',j.clientes),productos:mezcla('productos',j.productos),costos:j.costos,remitos:mezcla('remitos',j.remitos),
-       meta:{contador:j.contador,lista:{precios:j.lista}}};
+    S={clientes:mezcla('clientes',j.clientes),productos:mezcla('productos',j.productos),costos:j.costos,remitos:mezcla('remitos',j.remitos),pedidos:mezcla('pedidos',j.pedidos||{}),
+       meta:{contador:j.contador,lista:{precios:j.lista},pedidoClientes:(pend['meta/pedidoClientes']&&pend['meta/pedidoClientes'].datos)||{mapa:j.pedidoClientes||{}}}};
     S.prefijo=j.prefijo||'D';cargado=true;guardarCache();avisar();estado();
   }
   // ---- subir cambios pendientes, en orden
@@ -61,6 +62,8 @@
         if(op.col==='remitos')await (op.tipo==='borrar'?api('borrarRemito',{id:op.id}):api('guardarRemito',{datos:op.datos}));
         else if(op.col==='clientes')await api('guardarCliente',{id:op.id,datos:op.datos});
         else if(op.col==='productos')await api('guardarProducto',{id:op.id,datos:op.datos});
+        else if(op.col==='pedidos')await api('guardarPedido',{id:op.id,datos:op.datos});
+        else if(op.col==='meta')await api('guardarMeta',{id:op.id,datos:op.datos});
         cola.shift();guardarCola()}}
     catch(e){console.warn('sin conexión, reintento después',e)}
     finally{subiendo=false;estado()}
@@ -84,9 +87,10 @@
       async get(){return snapDoc(col,id)},
       onSnapshot(fn){subs.push({tipo:'doc',ruta,fn});setTimeout(()=>fn(snapDoc(col,id)),0);return()=>{}},
       async set(datos){
-        if(col==='meta')return;                                   // contador y lista los maneja la planilla
+        if(col==='meta'&&id!=='pedidoClientes')return;            // contador y lista los maneja la planilla
         S[col]=S[col]||{};S[col][id]=JSON.parse(JSON.stringify(datos));guardarCache();avisar();
         encolar({col,id,tipo:'guardar',datos:S[col][id]})},
+      async update(cambios){const base=(S[col]&&S[col][id])||{};return this.set(Object.assign(JSON.parse(JSON.stringify(base)),cambios))},
       async delete(){if(S[col])delete S[col][id];guardarCache();avisar();encolar({col,id,tipo:'borrar'})}
     }}
   };

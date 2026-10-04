@@ -916,6 +916,7 @@ async function guardarRemito(conFirma){
     await db.collection('remitos').doc(numero).set({...d,numero,firma,sinFirma:!firma,...extra});
     if(editando)salirCorreccion();
     if($('guardarPrecios').checked){const v=clientes[d.clienteId];const c={...v,precios:{...(v.precios||{}),...Object.fromEntries(d.items.map(i=>[i.key||i.code,i.precio]))}};clientes[d.clienteId]=c;await db.doc('clientes/'+d.clienteId).set(c)}
+    if(window.__pedidoListo)await window.__pedidoListo(numero);
     guardadoId=numero; flash(firma?`Remito ${numero} guardado con la firma.`:`Remito ${numero} guardado SIN FIRMAR. Lo firmás después desde Historial → Firmar.`);
     if(firma)await mostrarRemito(d,numero,firma); else {$('nuevo').click();flash(`Remito ${numero} guardado SIN FIRMAR. Lo firmás después desde Historial → Firmar.`)} // sin firmar: sin vista previa y pantalla limpia
   }catch(e){flash(e&&e.code==='sin_senal'?e.message:'No se pudo guardar el remito ('+((e&&(e.message||e.code))||'error')+'). Probá de nuevo.',true)}
@@ -973,6 +974,209 @@ $('corrcancel').onclick=()=>{$('nuevo').click()};
   db.collection('clientes').onSnapshot(s=>{clientes={};s.docs.forEach(d=>clientes[d.id]=d.data());renderClientes()},e=>{$('dbmsg').hidden=false;$('dbmsg').textContent='No se pudo leer la lista de clientes ('+e.code+').'});
   db.collection('remitos').orderBy('creado','desc').limit(200).onSnapshot(s=>{remitos=s.docs.map(d=>d.data());renderHist()},()=>{});
 })();
+</script>
+
+<style>
+/* pedidos (vista del dueño) */
+.ped-it{display:flex;flex-direction:column;gap:8px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--card)}
+.ped-it .t{font:700 20px/1.1 var(--f-display);letter-spacing:.02em}
+.ped-it .s{font-size:13px;color:var(--muted)}
+.ped-it ul{margin:0;padding-left:18px;font-size:15px}
+.ped-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.ped-prog{border:2px solid var(--brand);background:var(--brand-soft);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+.ped-prog .h{display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:600}
+.ped-row{display:flex;justify-content:space-between;gap:8px;font-size:15px}
+.ped-row.okk{color:var(--ok)}
+</style>
+<script>
+// ================= PEDIDOS (desde el catálogo por WhatsApp) =================
+const CAT_PRODUCTOS = [
+ ["Asado 11 Costillas",16700,"ribs",0,["100520426"]],
+ ["Asado 5 Costillas Black",18600,"ribs",1,["100523307"]],
+ ["Bife Ancho",19500,"steak",0,["100523036"]],
+ ["Bife Angosto",17300,"steak",0,["100523039","100010005"]],
+ ["Bola de Lomo",15100,"roast",0,["100522602","100010009"]],
+ ["Bondiola",7700,"roast",1,["100027726"]],
+ ["Colita de Cuadril",16600,"roast",0,["100010004","100523300"]],
+ ["Corazón de Cuadril",16000,"roast",0,["100523041"]],
+ ["Cuadrada",14900,"roast",0,["100522266","100010103","100011563"]],
+ ["Entraña",19500,"strip",0,["100010689"]],
+ ["Lomo",23000,"roast",0,["100523040","100517635"]],
+ ["Matambre Black",13400,"strip",0,["100517143","100520272"]],
+ ["Molleja",21000,"steak",1,["100016121","100016120"]],
+ ["Nalga c/Tapa",16200,"steak",0,["100522741"]],
+ ["Nalga s/Tapa",17000,"steak",0,["100523042","100012202"]],
+ ["Peceto",17300,"roast",0,["100522265"]],
+ ["Tapa de Asado",12100,"strip",0,["100010839"]],
+ ["Tapa de Nalga",12200,"strip",1,[]],
+ ["Vacío",14500,"strip",0,["100010001","100013155","100010432"]]
+].map(([name,price,icon,cong,codes]) => ({name,price,icon,cong:!!cong,codes}));
+const CAT_BY = Object.fromEntries(CAT_PRODUCTOS.map(p => [p.name,p]));
+const fechaCorta = iso => new Date(iso).toLocaleString("es-AR",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"});
+const cajasTxt = n => n === 1 ? "1 caja" : n + " cajas";
+
+function iniciarPedidos(){
+  let pedidos = [], mapa = {}, activo = null;
+  try{ const a = JSON.parse(localStorage.getItem("pedidoActivo")||"null"); if (a && a.dia === hoy()) activo = a; }catch(_){}
+  const guardarActivo = () => { try{ localStorage.setItem("pedidoActivo", JSON.stringify(activo ? {...activo, dia:hoy()} : null)); }catch(_){} };
+  const esc = s => String(s==null?"":s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  const normN = s => String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+
+  // pestaña
+  const tabPed = document.createElement("button");
+  tabPed.className = "tab"; tabPed.id = "tab-ped"; tabPed.setAttribute("role","tab"); tabPed.setAttribute("aria-selected","false");
+  tabPed.textContent = "Pedidos";
+  document.querySelector("header.top .tabs").prepend(tabPed);
+  const vista = document.createElement("div");
+  vista.id = "view-ped"; vista.hidden = true;
+  vista.innerHTML = `<section class="card"><div class="step"><h2>Pegar pedido de WhatsApp</h2></div>
+    <p class="hint">Mantené apretado el mensaje del pedido en WhatsApp → Copiar. Después pegalo acá.</p>
+    <textarea id="ped-txt" rows="5" placeholder="*Pedido Swift*&#10;Cliente: …&#10;- Vacío: 2 cajas"></textarea>
+    <div class="actions"><button class="btn ghost" id="ped-pegar">Pegar del portapapeles</button><button class="btn" id="ped-agregar">Agregar pedido</button></div>
+  </section>
+  <section class="card"><div class="step"><h2>Pedidos recibidos</h2></div><div id="ped-list" class="hist"><div class="empty">Cargando pedidos…</div></div></section>`;
+  $("view-hist").after(vista);
+  function verPed(){ $("view-nuevo").hidden = true; $("view-nuevo").style.display = "none"; $("view-hist").hidden = true; vista.hidden = false;
+    tabPed.setAttribute("aria-selected","true"); $("tab-nuevo").setAttribute("aria-selected","false"); $("tab-hist").setAttribute("aria-selected","false"); }
+  tabPed.onclick = verPed;
+  $("tab-nuevo").addEventListener("click", () => { vista.hidden = true; tabPed.setAttribute("aria-selected","false"); });
+  $("tab-hist").addEventListener("click", () => { vista.hidden = true; tabPed.setAttribute("aria-selected","false"); });
+
+  // progreso del pedido dentro del paso 2
+  const prog = document.createElement("div");
+  prog.id = "ped-prog"; prog.className = "ped-prog"; prog.hidden = true;
+  $("boxes").closest("section").querySelector(".step").after(prog);
+  function codigosDe(cut){ const p = CAT_BY[cut]; return p ? p.codes.map(c => EQUIV[c] || c) : []; }
+  function renderProg(){
+    if (!activo){ prog.hidden = true; return; }
+    prog.hidden = false;
+    const usados = new Set();
+    const filas = activo.items.map(i => {
+      const codes = codigosDe(i.cut);
+      const n = cajas.filter((c,idx) => { if (codes.includes(c.code)){ usados.add(idx); return true; } return false; }).length;
+      const ok = n >= i.qty;
+      return `<div class="ped-row${ok?" okk":""}"><span>${ok?"✓ ":""}${esc(i.cut)}</span><span class="mono">${n} de ${i.qty} ${i.qty===1?"caja":"cajas"}</span></div>`;
+    }).join("");
+    const extra = cajas.length - usados.size;
+    prog.innerHTML = `<div class="h"><span>Pedido de ${esc(activo.nombre)}</span><button class="btn ghost small" id="ped-quitar">Quitar pedido</button></div>${filas}`
+      + (extra > 0 ? `<p class="hint">${extra} caja(s) escaneada(s) que no estaban en el pedido.</p>` : "")
+      + '<p class="hint">Escaneá cada caja con el lector: los kilos se cargan solos.</p>';
+    $("ped-quitar").onclick = () => { activo = null; guardarActivo(); renderProg(); };
+  }
+  const _render = render;
+  render = function(){ _render(); try{ renderProg(); }catch(_){} };
+  const _nuevo = $("nuevo").onclick;
+  $("nuevo").onclick = () => { activo = null; guardarActivo(); _nuevo(); };
+
+  async function cambiarEstado(uidC, orderId, cambios){ await db.doc("pedidos/" + orderId).update(cambios); }
+
+  // leer el mensaje de WhatsApp
+  const cortesN = CAT_PRODUCTOS.map(p => ({p, n:normN(p.name)})).sort((a,b) => b.n.length - a.n.length);
+  function leerMensaje(txt){
+    let name = "", items = [], raros = [];
+    String(txt).split(/\r?\n/).forEach(l0 => {
+      const l = l0.replace(/^\s*\[[^\]]*\]\s*[^:]*:\s*(?=\*?Pedido|Cliente|[-•])/i, "").trim();
+      const c = l.match(/^\*?cliente\*?\s*:\s*(.+)$/i); if (c){ name = c[1].replace(/\*/g,"").trim(); return; }
+      const m = l.match(/^[-•*]?\s*(.+?)\s*:\s*(\d+)\s*caja/i);
+      if (!m || /^total/i.test(m[1])) return;
+      const n = normN(m[1]); const hit = cortesN.find(x => x.n === n) || cortesN.find(x => n.includes(x.n));
+      const q = parseInt(m[2], 10);
+      if (hit && q > 0){ const ex = items.find(i => i.cut === hit.p.name); if (ex) ex.qty += q; else items.push({cut:hit.p.name, qty:q}); }
+      else raros.push(m[1]);
+    });
+    return {name, items, raros};
+  }
+  $("ped-pegar").onclick = async () => {
+    try{ const t = await navigator.clipboard.readText(); if (t) $("ped-txt").value = t; else flash("El portapapeles está vacío. Copiá el mensaje en WhatsApp primero.", true); }
+    catch(_){ $("ped-txt").focus(); flash("Mantené apretado el recuadro y elegí Pegar.", true); }
+  };
+  $("ped-agregar").onclick = async () => {
+    const r = leerMensaje($("ped-txt").value);
+    if (!r.items.length){ flash("No encontré cortes en ese texto. Pegá el mensaje completo del pedido.", true); return; }
+    if (!r.name) r.name = "Sin nombre";
+    const total = r.items.reduce((s,i) => s+i.qty, 0);
+    const firma = normN(r.name) + "|" + r.items.map(i => i.cut + i.qty).join(",");
+    const rep = pedidos.find(p => !p.descartado && p.firma === firma && p.at.slice(0,10) === new Date().toISOString().slice(0,10));
+    if (rep && !await preguntar({titulo:"¿Pedido repetido?", texto:`Hoy ya cargaste un pedido igual de ${r.name}. ¿Agregarlo otra vez?`, si:"Agregar igual"})) return;
+    if (!db){ flash("No hay conexión con el almacenamiento: no se puede guardar el pedido.", true); return; }
+    const id = Date.now().toString(36);
+    try{
+      await db.doc("pedidos/" + id).set({id, name:r.name, items:r.items, total, at:new Date().toISOString(), done:false, firma});
+      $("ped-txt").value = "";
+      flash(`Pedido de ${r.name} agregado: ${cajasTxt(total)}.` + (r.raros.length ? ` No reconocí: ${r.raros.join(", ")}.` : ""), !!r.raros.length);
+    }catch(e){ flash("No se pudo guardar el pedido (" + (e.code || e.message) + ").", true); }
+  };
+  // al guardar el remito, el pedido queda como preparado
+  window.__pedidoListo = async numero => {
+    if (!activo) return;
+    const a = activo; activo = null; guardarActivo();
+    try{ await cambiarEstado(a.uid, a.id, {done:true, remito:numero}); }catch(_){ flash("El remito se guardó, pero no se pudo marcar el pedido como preparado.", true); }
+  };
+
+  function sugerirCliente(nombre){
+    const n = normN(nombre); if (!n) return "";
+    const hit = Object.entries(clientes).find(([,c]) => { const m = normN(c.nombre); return m && (m === n || m.includes(n) || n.includes(m)); });
+    return hit ? hit[0] : "";
+  }
+
+  function armar(p, clienteId){
+    if (!clienteId){ flash("Elegí a qué cliente de remitos corresponde este pedido.", true); return; }
+    const kn = normN(p.name); if (mapa[kn] !== clienteId && db){ mapa[kn] = clienteId; db.doc("meta/pedidoClientes").set({mapa}).catch(()=>{}); }
+    _nuevo();
+    $("cliente").value = clienteId; showCliente();
+    activo = {uid:p.uid, id:p.id, nombre:p.name, items:p.items}; guardarActivo();
+    vista.hidden = true; tabPed.setAttribute("aria-selected","false");
+    tab("nuevo"); modo("lec"); render();
+    window.scrollTo({top:0});
+    flash(`Remito armado para ${clientes[clienteId] ? clientes[clienteId].nombre : p.name}. Escaneá las cajas.`);
+  }
+
+  function renderLista(){
+    const box = $("ped-list");
+    const pend = pedidos.filter(p => !p.done).sort((a,b) => a.at.localeCompare(b.at));
+    const listos = pedidos.filter(p => p.done).sort((a,b) => b.at.localeCompare(a.at)).slice(0,20);
+    tabPed.textContent = pend.length ? `Pedidos (${pend.length})` : "Pedidos";
+    if (!pedidos.length){ box.innerHTML = '<div class="empty">Todavía no llegó ningún pedido. Cuando te llegue uno por WhatsApp, copialo y pegalo arriba.</div>'; return; }
+    const opts = Object.entries(clientes).sort((a,b)=>a[1].nombre.localeCompare(b[1].nombre)).map(([id,c]) => `<option value="${esc(id)}">${esc(c.nombre)}</option>`).join("");
+    const card = (p, listo) => {
+            return `<div class="ped-it" data-k="${esc(p.uid)}|${esc(p.id)}">
+        <div class="ped-top"><span class="t">${esc(p.name)}</span><span class="pill ${listo?"ok":"pend"}">${listo ? (p.descartado ? "Descartado" : "Remito " + esc(p.remito||"")) : "Nuevo"}</span></div>
+        <span class="s">${fechaCorta(p.at)} · ${cajasTxt(p.total)}</span>
+        <ul>${p.items.map(i => `<li>${esc(i.cut)}: ${cajasTxt(i.qty)}</li>`).join("")}</ul>
+        ${listo ? "" : `<label>Cliente en remitos<select class="ped-cli"><option value="">Elegí el cliente…</option>${opts}</select></label>
+        <div class="actions"><button class="btn ped-armar">Armar remito</button><button class="btn ghost ped-desc">Descartar</button></div>`}
+      </div>`;
+    };
+    box.innerHTML = (pend.length ? pend.map(p => card(p,false)).join("") : '<div class="empty">No hay pedidos pendientes.</div>')
+      + (listos.length ? `<details><summary>Pedidos ya preparados (${listos.length})</summary><div class="hist" style="margin-top:8px">${listos.map(p => card(p,true)).join("")}</div></details>` : "");
+    box.querySelectorAll(".ped-it").forEach(el => {
+      const [u, id] = el.dataset.k.split("|");
+      const p = pedidos.find(x => x.uid === u && x.id === id); if (!p) return;
+      const sel = el.querySelector(".ped-cli");
+      if (sel) sel.value = mapa[normN(p.name)] || sugerirCliente(p.name);
+      const a = el.querySelector(".ped-armar"); if (a) a.onclick = () => armar(p, sel.value);
+      const d = el.querySelector(".ped-desc"); if (d) d.onclick = async () => {
+        if (!await preguntar({titulo:"Descartar pedido", texto:`¿Descartar el pedido de ${p.name}? El cliente lo va a ver como "No se preparó".`, si:"Descartar", peligro:true})) return;
+        try{ await cambiarEstado(p.uid, p.id, {done:true, descartado:true}); }catch(_){ flash("No se pudo descartar. Probá de nuevo.", true); }
+      };
+    });
+  }
+
+  (async () => {
+    const d = await claude.use("db"); if (!d) return;
+    d.doc("meta/pedidoClientes").onSnapshot(s => { mapa = (s.exists && s.data().mapa) || {}; renderLista(); }, () => {});
+    d.collection("pedidos").orderBy("at","desc").limit(200).onSnapshot(s => {
+      pedidos = s.docs.map(doc => ({...doc.data(), uid:doc.id}));
+      renderLista();
+    }, () => { $("ped-list").innerHTML = '<div class="empty">No se pudieron cargar los pedidos. Recargá la página.</div>'; });
+  })();
+  // la lista de clientes llega después: volver a dibujar cuando cambie
+  const _rc = renderClientes;
+  renderClientes = function(){ _rc(); try{ renderLista(); }catch(_){} };
+  renderProg();
+}
+
+iniciarPedidos();
 </script>
 
 <script>if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));</script>
