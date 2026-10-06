@@ -6,7 +6,13 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="icon-192.png">
 <meta name="mobile-web-app-capable" content="yes">
-<style>*{box-sizing:border-box}html,body{margin:0}</style>
+<style>*{box-sizing:border-box}html,body{margin:0}.ocr-ov{position:fixed;inset:0;z-index:60;background:#111;display:flex;flex-direction:column;color:#fff}
+.ocr-top{padding:10px 14px;display:flex;flex-direction:column;gap:2px;font-size:15px}
+.ocr-img{flex:1;overflow:auto;display:flex;align-items:center;justify-content:center}
+.ocr-img canvas{max-width:100%;max-height:100%;touch-action:manipulation}
+.ocr-bar{padding:10px 14px calc(10px + env(safe-area-inset-bottom));background:#1d1d1d;display:flex;flex-direction:column;gap:8px}
+.ocr-res{min-height:20px;font-size:15px}.ocr-ov .btn.ghost{color:#fff;border-color:#888;background:transparent}.ocr-acc{display:flex;gap:8px;justify-content:flex-end}
+</style>
 <script src="conexion.js"></script>
 </head><body>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -272,6 +278,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:14px}
     <b id="dlg-tit"></b>
     <p id="dlg-txt" class="dlgtxt"></p>
     <input id="dlg-in" hidden>
+    <button class="btn ghost" id="dlg-foto" hidden style="width:100%;margin-top:8px">📷 Leer el peso con una foto</button>
     <div class="rv-acc"><button class="btn ghost" id="dlg-no">Cancelar</button><button class="btn" id="dlg-si">Aceptar</button></div>
   </div>
 </div>
@@ -399,18 +406,23 @@ function procesarLectura(txt){
   try{navigator.vibrate&&navigator.vibrate(60)}catch(_){}
 }
 // el lector leyó el código grande de la etiqueta Swift (sin peso): se pide el PESO NETO a mano
-async function pedirKgLector(p){
+async function pedirKgLector(p,file=null){
   if(cajas.some(c=>c.raw===p.raw)){lecMsg('Esa caja ya estaba cargada: '+(PRODUCTOS[p.code]||p.code)+'.',false);return}
   try{navigator.vibrate&&navigator.vibrate([40,40])}catch(_){}
-  const inp=$('dlg-in');inp.inputMode='decimal';
-  const v=await preguntar({titulo:PRODUCTOS[p.code]||('Código '+p.code),texto:'Leíste el código grande, que no trae el peso. Escribí el PESO NETO de la etiqueta.\nLa próxima vez apuntá al código chico de abajo de ENFRIADO / CONGELADO: ese carga los kilos solo.',input:'Peso neto (ej: 21,547)',si:'Agregar'});
-  inp.inputMode='';setTimeout(()=>$('lec').focus(),50);
-  if(v===null||v===undefined)return;
-  const kg=parseFloat(String(v).replace(/\./g,'').replace(',','.'))||parseFloat(String(v));
-  if(!(kg>0&&kg<100)){lecMsg('Peso no válido, volvé a escanear la caja.',false);return}
+  const nom=PRODUCTOS[p.code]||('Código '+p.code);let kg=null;
+  while(kg===null){
+    const inp=$('dlg-in');inp.inputMode='decimal';
+    const v=await preguntar({titulo:nom,texto:'Este código no trae el peso. Sacale una foto a la etiqueta y tocá el PESO NETO, o escribilo.',input:'Peso neto (ej: 9,010)',si:'Agregar',foto:true});
+    inp.inputMode='';
+    if(v===null||v===undefined){setTimeout(()=>$('lec').focus(),50);return}
+    if(typeof v==='object'&&v.foto){const k=await pesoDeFoto(file,nom);file=null;if(k)kg=k;continue}
+    const n=parseFloat(String(v).replace(/\./g,'').replace(',','.'))||parseFloat(String(v));
+    if(n>0&&n<100)kg=n;else{lecMsg('Peso no válido, volvé a escanear la caja.',false);setTimeout(()=>$('lec').focus(),50);return}
+  }
+  setTimeout(()=>$('lec').focus(),50);
   const q={raw:p.raw,code:p.code,kg:Math.round(kg*1000)/1000};
   cajas.push({...q,origen:'lector',dup:false});render();
-  lecMsg('✓ '+(PRODUCTOS[q.code]||('Código nuevo '+q.code))+' · '+fkg3(q.kg)+' kg  ('+cajas.length+' caja'+(cajas.length>1?'s':'')+')',true);
+  lecMsg('✓ '+nom+' · '+fkg3(q.kg)+' kg  ('+cajas.length+' caja'+(cajas.length>1?'s':'')+')',true);
 }
 $('lecrclr').onclick=()=>{lecRaros=[];try{localStorage.removeItem('lecRaros')}catch(_){}verRaros()};verRaros();
 let lecT=null;
@@ -421,6 +433,104 @@ document.addEventListener('keydown',e=>{if($('p-lec').hidden)return;const t=e.ta
 $('lec').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key==='Tab'){e.preventDefault();clearTimeout(lecT);const v=$('lec').value;$('lec').value='';procesarLectura(v)}});
 // por si el lector no manda Enter al final: procesa cuando deja de escribir
 $('lec').addEventListener('input',()=>{clearTimeout(lecT);lecT=setTimeout(()=>{const v=$('lec').value;if(v.replace(/\D/g,'').length>=16){$('lec').value='';procesarLectura(v)}},600)});
+
+// ---- Leer el PESO NETO de la foto de la etiqueta (para cajas cuyo código no trae el peso, ej. Molleja)
+// Funciona sin internet: el usuario toca el número en la foto y se reconocen los dígitos con plantillas
+// sacadas de etiquetas reales de Swift.
+const OCR_TPL=[["2","04dffffd406de846dfd3ff80008ff9b600008fff0000008fff0000008ff90000008ff40000008fb200006ffb000018efd500008fff800002cff0000008f9c0000008f8b0000008f8b000008bf8b88840",1.615],["0","006ffff60004df99fd404ff8006e914fd40008f44f600004f49f400004f9ff400004ffff400004ffff400004ffff400004ffff400004ffff400004ffff400008ffff90000bf72b400009400840000200",1.826],["4","000000ff00000006ff6000004fff8000004fff0000037fff00000bffff00003ec4ff0000ff00ff0000ff00ff007fff00ff00ffff00ff00ffff49ff94ffffffffff44444cfff700000044000000004400",1.957],["8","006bfffd4002cffcffd33dff714cfc2bff400bff08ff400bff08ff400bff08ff988dff08fffcffff08ff719fff4fd4000bffffb0000bffffb0000bff9fb0000bff08c2000bf402ad302981002b988200",1.556],["0","001cffc10000cffffc000bf9609fd20be3001cf40bb0000bf44fb0000bf44fb0000bf4ffb0000bf4ffb0000bf4ffb0000bf4ffb0000bfcffb0000bf47fb0000be32db0000bb00bc1001c000bf4001400",1.8],["1","0000027fff00006dffff088dffffffbfffddffffff9848ffff000008ffff000008ffff000008fff0000008fff0000008fff0000008fff0000008fff0000008fff0000008fff0000008fff0000008c440",1.08],["9","009ffff90008ffbbcf803ef7001ce34fb0000bf9cfb0000bffffb0000bff4fb0000bff4ff7001cff4fff80cfff4ffffffff44fff00fff44fff00ffc14fff00ffb03eff00ff8003cfbbe6000028ff6000",1.667],["3","009fffd80019fcbbff00cfc100ff80ff6000fff4440000ffe3000000ffb000068dffb0000bffffb0000344ffb00000004ff40000004fff4400004ffcff60004ff4cfc1007fe314cc49fc30002dffd200",1.667],["6","002dfff90003cfffff800bffffffe34ffffffff44ffffffff4cffffffff4fffffffff4fffc80cff4ffc1004ff4ffb0004ff4ffb0004ff77fb0004ffc4fb0004ff44ff4007fe314cc49fc30002dffd200",1.667],["6","002bfff94002affbdf9108fff08ff44ffff08ff44ffff08ff44ffff08ff4fffffffff4fffd33bef7ffc2000bffffb0000bffffb0000bff7fb0000bff4fb0000bff4ff8002cfc14ad66de81004ffffb00",1.556],["0","0028ff820003cfebfc300bf7307fb04fd2004ff47fb0001cf4ffb0000bf4ff00000bf9ff00000bf4ff00000bf4ff00000bf4ff00000bf4ff80003ef4ffb0004ff44fc1007fb03efcbbfc30069fffd200",1.667],["9","02bffffb0009fe64cf804df6008fb08f80004ff4df80004ff4ff80004fffff80004fffbfb0004ff98ffd88dff48ffffffff48fff9bfff48fff48ffe38fff48ffb04dff48ff6009ff79fd0002bfff9400",1.846],["7","fffffffff96bbbeffff70000bfffb20000bffe600000bffb000000bff4000002cf91000008ff8000002bfd4000004ffb0000008ff6000000bff0000006eff0000008ff40000008ff40000008ff400000",1.615],["8","008ffffd4018efcbdfd34fff408ffc4fff408fff4fff408fff4fff408ff74fff99fff44ffffffff44ffffffff49ff8000bf9fff8000bfffff8000bfffff8000bffcff9119ff419ffccfe81049fffb600",1.556],["0","02cfccfc203df9119fd39fb0000bf9ff90000bffff400008ffff400004fffb200004fff8000004f4f8000004f4f8000004f4f8000004f4ff40000bf4ff60000bf4ffb0004df43dff77fe6002cfff9300",1.68],["1","00000247f4000008ffff0068bfffffbbeffffffb8888bffff00000004ff00000004ff00000004ff00000004ff00000004ff00000004ff0000008fff0000008fff0000008fff0000008fff0000008fff0",1.08],["3","037ffff7003ef74cff809fb00bffd2bb800bffe300000bffb000000bff0000002dff000000bb8b000000000b000000000b000000000bb30000002dffbb30004ff7ffb0009ff4cff74cffb014fffff730",1.8],["6","008ffffd8206effffff408fffffff94ffffffffc4fffffff919fffffff80ffffcbdf80ffd8204980ffb0000480ffb0000494ffb00004ffcfb00006ff4fb0000bff4ffb204df918efcbdfd30068dfb840",1.615],["2","008dff880019fcbbcf91cfc1001cf49f60000bf41400000bf40000000bf40000002df40000007fe3000008ff3000009ff900001cffb000007fffb00006ffffb0007fffffb000ffffffebbb9ffffffff9",1.667],["0","006bffb20006edbbda203dc2008fd3ff800008f4ff400004f4ff400004f4ff400004f4ff400004ffff400004ffff400004ffff400004ffff900006f79fb0000bf43df9114cd306cfccfc60002bffb200",1.556],["7","ffffffffff444444cffc000000bff4000000b000000000b000000048d00000008ff0000002bff0000004ff4000000cfd3000000ff80000000ff80000008ff8000000bf80000000bf800000006d400000",1.5],["0","0028ffd80003cfbbff303ef7007fb04fb0002df44fb0000bf44fb0000bf49fb0000bffffb0000bffffb0000bffffb0000bffcfb0000bfc4fc1000bf44ff4002df408ff307fb0006eebfc300006f98200",1.667],["0","002dfff90003cfbbcf800bff004fe30bd20006f40bb00000f40bb00000f49fb00000ff4fc10003ff4ff4000bff4ff4000bff3ef4000bff0bf7000bf70bff000bf408ffc17fe3006efcfc8000069f8200",1.667],["1","0000049ff8000029ffff0006bfffff04cfffffffbfffffffff0882004fff0000004fff0000004fff0000004fff0000004fff0000004fff0000004fff0000004fff0000004fff0000004fff00000029f8",1.038],["9","006bfd820018efcbda204ff9102c809fb0000bf9ffb0000bffffb0000bffffb0000bff4fb0000bff4fe6006eff4fffffffff4fffffffff4fffffffff4ffffffff93dffffffd306effffe60006bffb600",1.556],["5","00fffffff403ffc4c4410bffb0b0000bffb0b0000bffb0b0002dffd8d2000bfcbbcc300bf4004fd20bb0000bff0bb0000bff0bb0000bff7fb0000bffffe3000bf72dff604fd208cfebcf800028ff8800",1.731],["8","008fffb60018edbcfc20cff804ffd3fff804fff4fff804fff47ff804fff44ffff9fff44ffffffff44ff947fff49fb0008ff9ffb0008fffffb0008fffffb0008fff4ff9119ff418efccfe81006bffb600",1.556],["6","002bfff80002affffe6008ffffffd34ffffffff44ffffffff4cffffffff4fffffffff4fff8006ef4fff8000bfcfff8000bff4ff8000bff4ff8000bff4ff8000bff08ff714cf402affcff910028dff940",1.556],["0","008ffd820018ed6cfa204fd402bf807f90006ef4ff40000bf4ff40000bf4ff40000bf7ff40000bffff40000bffff40000bffff40000bffff40000bf4ff90000bf44fb0004d8019eb66de60049ffff800",1.615],["9","008fffb20018edbbda209fd4008fb2ffb0000bf4ffb0000bfcffb0000bffffb0000bffffb0000bff4ffb22bfff4fffccffff4fffffffff4ffffffffc4ffffffff44ffffffff418effffe81008ffff800",1.615],["7","8bffffffb86bbbbfffff00000ffff900000fff8000000ffc2000000ff80000008ff4000000bfb2000004df80000008fe6000002bfb0000004ffb0000004ff30000004ff00000004ff00000004ff00000",1.615],["8","04dffff80019fdbcfc209ff804ff80fff804ff91fff804fff4fff804fff4fffdbcfff4fffffffff4fffb8ffff4ffc2049ff4ffb0008ff4ffb0008ff7ffb0008ff79fd4008ff418edbbde81008ffff800",1.615],["0","008fffb20018edbbda204fd4008fb27f90000bf4ff40000bf4ff400004ffff400004ffff400004ffff400004ffff400004ffff400004ffcf600006f44fb0000bf44fd4000bf418edbbbd81008fffb600",1.615],["1","0000027ff000006dfff00068bffff0bbeffffff0fff98bfff8000008ffff000008ffff000008ffff000008ffff000008ffff0000027fff0000004fff0000004fff0000004fff0000004fff0000004ff4",1.08],["3","009fffd20019fc6efc009fd20bff60ff800bffb044000bffb000000bffb000006effb00000ffffb00000009fd20000001cfc0000000bff7730000bfc7fb0000bf44ff9002df419ffbbcf91008dff8800",1.731],["6","006bfffd4002cff7ff912bfff4fff44ffff4fff44ffff4fff4fffff9fff4ffffccfff4fffb228df4ffb00008ffffb00004ffffb00004ff4fb00004ff4fb00004ff08fb204df402afcbde81002bfff800",1.615],["9","002df8600006effffa106fff44cfc0dfc6001af2ff400004f8ff400004ffdf600004ff8fc4001aff2fff847fff0fffffffff0ff9ff6bff0ff4000bfb8ff4000bf88ff7006ef62cffbbff70029ffff800",1.543],["5","04ffffff400ffecfff600ffb4fc4000ffb4fb0000ffb4fb000bfffffd200dfffdfff606fe624aff20430001cf800000003f800000000fb00000000ffdf800019f86fe631aff209ffecff90008dff9800",1.629],["6","0006bb820006effffe600fff84cff68fff004fffbfff004ffbffff447ff0fffffffff0ffffb8fff0ffd2002df8ff400006ffff400004ffff400004ff8fd20008ff0cff846ef903cfffffc20006fff800",1.5],["0","0068ff60000cfffffa106ff744cf708fc1003ef2ff400004f8ff400004f8ff400004fbff400004ffff400004ffff400004ffff400004ffbf400008fb6fc1001cf80ffc22cff607ffddff70008fffd600",1.543],["9","008fff60004ffffff800dfe624cf70ff60001af0ff400004f6ff400004f9ff400004ff8fd2002dff0fffb89fff0fffffddff0ff7440bfd4ff4000bf8fff4001cf8dff722cff60ffffffd20028dffd200",1.588],["0","029fff82000ffffffb008fe604cfc09f90001cf2ff400009f8ff400004fdff400004ffff400004ffff400004ffff400004ff9f400004ff8f900009fd2fe6001cf80cff84cff202dffffd200028ff8200",1.588],["1","00000fff800008fffff008ffffffffffffffffffbbb400ffff000000ffff000000ffff000000bfff0000000fff0000000fff0000000fff0000000fff0000000fff0000000fff0000000fff00000008ff",0.909],["0","029fff60004ffffff8008fe604cf709fb0003ef0ff600009f6ff400004f8ff400004f8ff400004ffff400004ffff400004ffdf400006ff8f90000bf92fe3003ef60cfc44cff002dffffd200028ff8200",1.588],["0","029fff60000ffffff8008ff904ff408fb0009ff0bf40000bf8ff400004f8ff400004ffff400004ffff400004ffff400004ffbf400004ff8fb00008ff0ff9000bfb04ffb49ff8008ffffff00028fff920",1.688],["4","000008f40000002df80000008ff8000004fff800000bd6f800004fb0b80000bf40b80004fb00bf000bfb00bf008ffb00bf00fffd88dfb4bfffffffff088888dfb80000008f800000004f800000004f00",1.969],["5","0bfffff9400fffffff800ffffff9000ffffff4000ffffff4008ffffff700ffffdfff608ff726cfd00441001cf60000000bf80000000bfd2400000bfd8fd2002df80ffd88dff004ffffff800028dfd200",1.727],["0","029fff60000ffffff8004ff904fd20bfb0004f90ff400009f6ff400004f8ff400004f8ff400004fdff400004ffff400004ffdf400004ff8f900009fd0ff9002df809fff8fff002dffffd200006b88200",1.636],["0","028fff80000bfffffd208ffb88ff80bf90004fd4ff400009f8ff400004ffff400004ffff400004ffff400004ffff400004ffbf400004ff8ff00009ff4df4000ff808ff88bfd402dfffff8000049f8000",1.594],["1","000008f8000000fffff0088ffffff08ffffffff0fff80ffff0880000fff0000000fff0000000fff0000000fff0000000fff8000000ffff000000ffff000000ffff000000ffff000000ffff00000008f8",0.938],["0","028bf940000bfffffb008ffb88ff80bff0004fb0ff400009f8ff400004ffff400004ffff400004ffff400004ffff400004ffff400004ffbf900009ff4df4004ffb0bff88bfd402dfffff80000bff8600",1.594],["0","0068ff820009fffff8000ff904ff404fb0002df08fb00008f8bf400004f8bf400004ff8f400004ff8f400004ff8f400004ff8f800004ff4fb0000bfb0ff4002df804ff88fff000bffffd200028bb8200",1.688],["9","04ff8000004fffff4000ffb40bf400ff40008b00ff00000f609f00000fd08f20000ff02dd2000ff206fd848ff800fffffbf900ffdb80ff00ff8000f908ff8000f800ff8004f8004ffbbff00008ffff40",1.818],["9","0bffb400008ffbbf8000bfb008f400ff0000bb00df00000f608f00000fd08f20000ff02dd2002ff606fd84dff800fffff8f800ff8b40fb00ff0000f808ff0000f800ff400bf8004fffffb00004bffb00",1.818],["4","00008f40000002df40000008ffb000002dbfb000005e36b000008b04e30002d904f40008c101c70009b000b8006fb000b8009fc444cd42dffffffffd0888889fb40000002d800000000b800000000b80",1.909],["0","089ff800008fffff80008f4119d6009900009f00f800003e60f800000bd0f8000006f088000000f88b000000f88f000000f82f300000fd0de30000f906fa1003f800cfa35ef6002dffffb000008fd200",1.676],["9","04ffd820000fffffd2008ff806df00ffb0002d808fb0000bf08fb0000bf88fb0000bf80ff8000bfb04ff989fff00fffff9bf00ff98608f00ff40008f08ff40008f04ff4006fb009ffbfff00006dff940",1.781],["3","08d86000008ffffd2000bf606dd200f80004ff00800004ff00000004ff00000008ff000004ffff000002dfff400000006df400000000f808600000ff0bf40000ff04fd2000ff009ffddff40002dfff40",1.781],["9","09ffb400008fffffd200ffd208f800ff40004f40ff40000bf0ff40000bf8bf80000bf84fd2000bfb09ffb89fff04fffff8bf04ffb860bf04ff8000bf0fff8002df02df8008fb008ffffff000068ff920",1.688],["0","028db400004fffff60008fd24ff4008f4000fd20ff40002d90ff400008f4bf400004f88f400002d88f400000bb8f400000bf0fb00000bf0fb00000bf04f90004ff00bfb008f8004ffb9ff40006bff980",1.688],["0","08dfb400008fffff60008fc68de5008f4002cc10df40003e70ff400006f0ff400004f48f400004f88f400002d80f400000bf0f600000bf0cc10000bf01cc2003ed006fd44af8002dfffff80000bffd80",1.8],["4","0000b400000000ff00000019ff8000006f8fb00000bf09c10003ec08f40009d208f4000fb008f8008fb008fb00ffb008fd20ffebbdffc8bbbbbfffff0000047ff40000001cf00000000bf00000000890",1.8],["5","ffff982000ffffffb000ffffff6000ffffff4000ffffff4000ffffff6000ffffffd200bf8206df400000002df000000000f800000000f802300000f908e50003f902ce626ef2004ffbffb000069fd840",1.9],["0","49ffd20000ffffffb000fe646ef300fb0003de30fb00002f90fb000007c2fb000004f8fb000002d88d200000bb8f400000bf6e400000bf09c20000bf03ed3001cf008fe64cf9000ffffff8000488b820",1.7],["0","089fb400008fffff30008fa48de3008f4002fa10bf40009f40bf40000bf08f400008f08f400004f22f400004f80f400004f80fb00004f804d20004fb01cc2004f8006fd44af8001cfffff200008bf920",1.862],["1","0006dd6000002cffb00016dfffb0009ff9dfd4009d820ff80013000cf800000004f910000004ff400000029f400000004f710000004ff40000004ff400000008f400000008fc00000008ff00000004d9",1.286],["0","028bd800008fffff90008fc46bf910df40009f40ff40004f80ff400004d4ff400004f89f400003e88f400000b98f400000bf4d400000bf08f00000bf04f80003ef019f944cf9000fffffc200049ff860",1.759],["0","06dff900006effff80008f746bf800bd2000bd20fb00004f80fb00000cb0fb000004e6fb000004f88d200004f88f400004f88f400004fd4d900004ff08f40004fb03ed302cf8008febdfc6000bfffd20",1.821]];
+const OCR_W=10,OCR_H=16;
+function ocrOtsu(g){const h=new Float64Array(256);for(let i=0;i<g.length;i++)h[g[i]]++;const n=g.length;let sum=0;for(let i=0;i<256;i++)sum+=i*h[i];
+  let wB=0,sB=0,best=0,t=128;for(let i=0;i<256;i++){wB+=h[i];if(!wB)continue;const wF=n-wB;if(!wF)break;sB+=i*h[i];const mB=sB/wB,mF=(sum-sB)/wF,v=wB*wF*(mB-mF)*(mB-mF);if(v>best){best=v;t=i}}return t}
+// recorte alrededor del toque (en la orientación pedida) -> gris de ~400 px de ancho
+function ocrVentana(img,tx,ty,rot){
+  const W=img.width,H=img.height,M=Math.max(W,H),hw=Math.round(M*0.10),hh=Math.round(M*0.04);
+  // en la ventana rotada, el ancho (texto) va en la dirección rotada
+  const rw=rot%180?hh:hw,rh=rot%180?hw:hh;
+  const sc=400/(2*hw),cw=Math.round(2*hw*sc),ch=Math.round(2*hh*sc);
+  const c=document.createElement('canvas');c.width=cw;c.height=ch;const g=c.getContext('2d',{willReadFrequently:true});
+  g.fillStyle='#fff';g.fillRect(0,0,cw,ch);g.translate(cw/2,ch/2);g.rotate(-rot*Math.PI/180);g.scale(sc,sc);
+  g.drawImage(img,-tx,-ty);
+  const d=g.getImageData(0,0,cw,ch).data,out=new Uint8Array(cw*ch);for(let i=0,j=0;j<out.length;i+=4,j++)out[j]=(d[i]*77+d[i+1]*150+d[i+2]*29)>>8;
+  return {gris:out,w:cw,h:ch,px:cw/2,py:ch/2}}
+function ocrComponentes(b,w,h){
+  const lab=new Int32Array(w*h),comps=[];let n=0;const st=new Int32Array(w*h);
+  for(let p=0;p<w*h;p++){if(!b[p]||lab[p])continue;n++;let sp=0;st[sp++]=p;lab[p]=n;let x0=w,y0=h,x1=0,y1=0,a=0;
+    while(sp){const q=st[--sp],x=q%w,y=(q-x)/w;a++;if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;
+      for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const xx=x+dx,yy=y+dy;if(xx<0||yy<0||xx>=w||yy>=h)continue;const r=yy*w+xx;if(b[r]&&!lab[r]){lab[r]=n;st[sp++]=r}}}
+    comps.push({i:n,x:x0,y:y0,w:x1-x0+1,h:y1-y0+1,a})}
+  return {lab,comps}}
+function ocrVector(lab,w,k){
+  // recorte de la tinta del componente, llevado a 10x16 promediando áreas + proporción ancho/alto
+  let x0=1e9,y0=1e9,x1=-1,y1=-1;
+  for(let y=k.y;y<k.y+k.h;y++)for(let x=k.x;x<k.x+k.w;x++)if(lab[y*w+x]===k.i){if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y}
+  const bw=x1-x0+1,bh=y1-y0+1,v=new Float32Array(OCR_W*OCR_H+1),S=4;
+  for(let ty=0;ty<OCR_H;ty++)for(let tx=0;tx<OCR_W;tx++){let s=0;
+    for(let sy=0;sy<S;sy++)for(let sx=0;sx<S;sx++){const X=x0+Math.min(bw-1,Math.floor((tx+(sx+.5)/S)*bw/OCR_W)),Y=y0+Math.min(bh-1,Math.floor((ty+(sy+.5)/S)*bh/OCR_H));if(lab[Y*w+X]===k.i)s++}
+    v[ty*OCR_W+tx]=s/(S*S)}
+  v[OCR_W*OCR_H]=bw/bh*3;return v}
+// devuelve {digitos:[vectores], coma: posición} o null
+function ocrSegmentar(win){
+  const {gris,w,h,px,py}=win,t=ocrOtsu(gris);let b=new Uint8Array(w*h);for(let i=0;i<b.length;i++)b[i]=gris[i]<t?1:0;
+  // cerrar cortes horizontales finos (rayas blancas de la impresora): dilatar y erosionar en vertical (7 px)
+  const R=3,dl=new Uint8Array(w*h);for(let y=0;y<h;y++)for(let x=0;x<w;x++){let on=0;for(let d=-R;d<=R&&!on;d++){const yy=y+d;if(yy>=0&&yy<h&&b[yy*w+x])on=1}dl[y*w+x]=on}
+  const er=new Uint8Array(w*h);for(let y=0;y<h;y++)for(let x=0;x<w;x++){let on=1;for(let d=-R;d<=R&&on;d++){const yy=y+d;if(yy>=0&&yy<h&&!dl[yy*w+x])on=0}er[y*w+x]=on}
+  b=er;
+  const {lab,comps:all}=ocrComponentes(b,w,h);
+  const comps=all.filter(k=>k.x>0&&k.y>0&&k.x+k.w<w&&k.y+k.h<h);
+  const dig=comps.filter(k=>k.h>=8&&k.h/Math.max(k.w,1)>=1&&k.h/Math.max(k.w,1)<=6);if(!dig.length)return null;
+  let seed=dig.reduce((m,k)=>{const d=(k.x+k.w/2-px)**2+(k.y+k.h/2-py)**2;return !m||d<m.d?{k,d}:m},null).k;
+  const sh=seed.h,cy=seed.y+sh/2;
+  const cand=comps.filter(k=>Math.abs(k.h-sh)<0.35*sh&&Math.abs(k.y+k.h/2-cy)<0.3*sh&&k.h/Math.max(k.w,1)>=0.4);
+  const ws=cand.filter(k=>k.h/k.w>=1.3).map(k=>k.w).sort((a,b)=>a-b);const mw=ws.length?ws[ws.length>>1]:seed.w;
+  let line=[];
+  for(const k of cand){
+    if(k.w>1.6*mw){ // dos números pegados: cortar donde hay menos tinta
+      const np=Math.round(k.w/mw),prof=new Int32Array(k.w);for(let y=k.y;y<k.y+k.h;y++)for(let x=0;x<k.w;x++)if(lab[y*w+k.x+x]===k.i)prof[x]++;
+      const cuts=[0];for(let p=1;p<np;p++){const e=Math.floor(k.w*p/np),lo=Math.max(1,e-3),hi=Math.min(k.w-1,e+4);let bi=lo;for(let x=lo;x<hi;x++)if(prof[x]<prof[bi])bi=x;cuts.push(bi)}cuts.push(k.w);
+      for(let j=0;j+1<cuts.length;j++)line.push({i:k.i,x:k.x+cuts[j],y:k.y,w:cuts[j+1]-cuts[j],h:k.h})}
+    else line.push(k)}
+  line.sort((a,b)=>a.x-b.x);
+  let si=line.indexOf(seed);if(si<0){si=0;let bd=1e9;line.forEach((k,j)=>{const d=Math.abs(k.x+k.w/2-px);if(d<bd){bd=d;si=j}})}seed=line[si];
+  let L=si,Rr=si;while(L>0&&line[L].x-(line[L-1].x+line[L-1].w)<0.6*sh)L--;while(Rr<line.length-1&&line[Rr+1].x-(line[Rr].x+line[Rr].w)<0.6*sh)Rr++;
+  const grp=line.slice(L,Rr+1);
+  const comas=comps.filter(k=>k.h>=0.12*sh&&k.h<0.5*sh&&k.w<0.5*mw&&k.y>cy&&k.y<seed.y+sh*1.4&&k.x>grp[0].x&&k.x<grp[grp.length-1].x+grp[grp.length-1].w);
+  const coma=comas.length?grp.filter(k=>k.x<comas[0].x).length:null;
+  return {vec:grp.map(k=>ocrVector(lab,w,k)),coma}}
+let ocrT=null;
+function ocrTpl(){if(ocrT)return ocrT;ocrT=OCR_TPL.map(([c,px,asp])=>{const v=new Float32Array(OCR_W*OCR_H+1);for(let i=0;i<px.length;i++)v[i]=parseInt(px[i],16)/15;v[OCR_W*OCR_H]=asp;return {c,v}});return ocrT}
+function ocrClasificar(v){let best=null;for(const t of ocrTpl()){let d=0;for(let i=0;i<v.length;i++){const e=v[i]-t.v[i];d+=e*e}if(!best||d<best.d)best={c:t.c,d}}return best}
+// lee el número tocado; prueba la foto derecha y girada. Devuelve {kg, texto} o null
+function ocrPeso(img,tx,ty){
+  let mejor=null;
+  for(const rot of [0,90,270,180]){
+    const s=ocrSegmentar(ocrVentana(img,tx,ty,rot));if(!s||s.vec.length<2||s.coma===null||s.coma<1||s.coma>=s.vec.length)continue;
+    const r=s.vec.map(ocrClasificar),dist=Math.max(...r.map(x=>x.d));if(dist>30)continue;
+    const dig=r.map(x=>x.c).join(''),texto=dig.slice(0,s.coma)+','+dig.slice(s.coma),kg=parseFloat(dig.slice(0,s.coma)+'.'+dig.slice(s.coma));
+    if(!(kg>0&&kg<100))continue;
+    if(!mejor||dist<mejor.dist)mejor={kg:Math.round(kg*1000)/1000,texto,dist};if(dist<15)break}
+  return mejor}
+// pantalla: muestra la foto, el usuario toca el PESO NETO, confirma
+function ocrElegirFoto(){return new Promise(res=>{const i=document.createElement('input');i.type='file';i.accept='image/*';i.capture='environment';i.onchange=()=>res(i.files&&i.files[0]||null);i.click()})}
+async function pesoDeFoto(file,titulo){
+  if(!file)file=await ocrElegirFoto();if(!file)return null;
+  let img;try{img=await createImageBitmap(file)}catch(_){img=await new Promise((ok,ko)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=ko;i.src=URL.createObjectURL(file)})}
+  return new Promise(res=>{
+    const ov=document.createElement('div');ov.className='ocr-ov';
+    ov.innerHTML=`<div class="ocr-top"><b></b><span>Tocá el número del <b>PESO NETO</b></span></div><div class="ocr-img"><canvas></canvas></div>
+      <div class="ocr-bar"><span class="ocr-res"></span><div class="ocr-acc"><button class="btn ghost" data-a="no">Escribir a mano</button><button class="btn" data-a="si" hidden>Usar</button></div></div>`;
+    ov.querySelector('.ocr-top b').textContent=titulo||'';document.body.append(ov);
+    const cv=ov.querySelector('canvas'),box=ov.querySelector('.ocr-img'),resEl=ov.querySelector('.ocr-res'),bSi=ov.querySelector('[data-a=si]');
+    const sc=Math.min(1,1600/Math.max(img.width,img.height));cv.width=Math.round(img.width*sc);cv.height=Math.round(img.height*sc);
+    const g=cv.getContext('2d');const pintar=(x,y)=>{g.drawImage(img,0,0,cv.width,cv.height);if(x!=null){g.strokeStyle='#c8102e';g.lineWidth=Math.max(3,cv.width/250);g.beginPath();g.arc(x*sc,y*sc,cv.width/40,0,7);g.stroke()}};pintar();
+    let leido=null;
+    const fin=v=>{ov.remove();res(v)};
+    cv.onclick=e=>{const r=cv.getBoundingClientRect(),x=(e.clientX-r.left)/r.width*img.width,y=(e.clientY-r.top)/r.height*img.height;pintar(x,y);
+      resEl.textContent='Leyendo…';bSi.hidden=true;
+      setTimeout(()=>{leido=ocrPeso(img,x,y);
+        if(leido){resEl.innerHTML='Leí <b>'+leido.texto+' kg</b>. ¿Está bien?';bSi.hidden=false;bSi.textContent='Usar '+leido.texto+' kg'}
+        else resEl.textContent='No pude leer ese número. Tocá justo encima del peso neto, o sacá otra foto más cerca y derecha.'},30)};
+    bSi.onclick=()=>fin(leido?leido.kg:null);ov.querySelector('[data-a=no]').onclick=()=>fin(null);
+  })}
 
 // ---- corte + kilos a mano
 let corteSel=null,todos=false;
@@ -603,7 +713,9 @@ async function leerBarras(file){
 async function procesarFoto(file,li){
   li.textContent='Foto recibida. Buscando el código de barras…';
   try{
-    const cods=await leerBarras(file);
+    const cods0=await leerBarras(file);const sinP=(cods0||[]).map(t=>parse(t)).filter(p=>p&&p.sinPeso);
+    const cods=cods0===null?null:cods0.filter(t=>!parse(t).sinPeso);
+    if(sinP.length&&!cods.length){li.className='ok';li.textContent=(PRODUCTOS[sinP[0].code]||sinP[0].code)+': tocá el peso neto en la foto.';await pedirKgLector(sinP[0],file);return}
     if(cods&&cods.length){
       const res=cods.map(t=>{const p=parse(t);const dup=cajas.some(c=>c.raw===p.raw);if(!dup)cajas.push({...p,origen:'barras',dup:false});return {...p,dup}});render();
       if(res.every(p=>p.dup)){li.className='err';li.textContent='Esa caja ya estaba cargada: '+res.map(p=>(PRODUCTOS[p.code]||p.code)+' · '+fkg3(p.kg)+' kg').join(' | ')+'. No la agregué de nuevo.';return}
@@ -769,12 +881,12 @@ $('fm-guardar').onclick=async()=>{
 };
 
 // ---- ventanas de confirmación propias (el celular bloquea confirm/prompt/alert dentro de la app)
-function preguntar({titulo='',texto='',input=null,si='Aceptar',no='Cancelar',peligro=false}){
+function preguntar({titulo='',texto='',input=null,si='Aceptar',no='Cancelar',peligro=false,foto=false}){
   return new Promise(res=>{$('dlg-tit').textContent=titulo;$('dlg-txt').textContent=texto;
     const inp=$('dlg-in');inp.hidden=input===null;inp.value='';inp.placeholder=input||'';
     $('dlg-si').textContent=si;$('dlg-si').className='btn'+(peligro?' peligro':'');$('dlg-no').textContent=no;$('dlg-no').hidden=no===null;
-    $('dlg').hidden=false;if(input!==null)setTimeout(()=>inp.focus(),50);
-    const fin=v=>{$('dlg').hidden=true;$('dlg-si').onclick=$('dlg-no').onclick=null;res(v)};
+    $('dlg-foto').hidden=!foto;$('dlg').hidden=false;if(input!==null)setTimeout(()=>inp.focus(),50);
+    const fin=v=>{$('dlg').hidden=true;$('dlg-si').onclick=$('dlg-no').onclick=$('dlg-foto').onclick=null;res(v)};$('dlg-foto').onclick=()=>fin({foto:true});
     $('dlg-si').onclick=()=>fin(input!==null?inp.value:true);$('dlg-no').onclick=()=>fin(input!==null?null:false)})}
 const avisar=(texto,titulo='Atención')=>preguntar({titulo,texto,no:null,si:'Entendido'});
 
@@ -1229,8 +1341,7 @@ iniciarPedidos();
   const kgf = n => (Math.round(n*10)/10).toLocaleString("es-AR",{minimumFractionDigits:0,maximumFractionDigits:1});
   const corto = n => n>=1e6 ? (Math.round(n/1e5)/10).toLocaleString("es-AR")+" M" : n>=1e3 ? Math.round(n/1e3)+" mil" : String(Math.round(n));
   const isoLocal = d => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
-  let periodo = "mes";
-  try{ periodo = localStorage.getItem("resPeriodo") || "mes"; }catch(_){}
+  let periodo = "mes"; // siempre abre en "Este mes"
 
   // ---- aviso de remitos sin firmar (arriba del remito nuevo)
   const aviso = document.createElement("div");
@@ -1272,13 +1383,13 @@ iniciarPedidos();
     const tp = $("tab-ped"); if (tp) tp.setAttribute("aria-selected","false");
     vista.hidden = false; vista.style.display = "flex";
     tabRes.setAttribute("aria-selected","true"); $("tab-nuevo").setAttribute("aria-selected","false"); $("tab-hist").setAttribute("aria-selected","false");
-    renderRes();
+    periodo = "mes"; renderRes();
   }
   tabRes.onclick = verRes;
   $("tab-nuevo").addEventListener("click", ocultar);
   $("tab-hist").addEventListener("click", ocultar);
   const tp = $("tab-ped"); if (tp) tp.addEventListener("click", ocultar);
-  vista.querySelectorAll(".res-chip").forEach(b => b.onclick = () => { periodo = b.dataset.p; try{ localStorage.setItem("resPeriodo", periodo); }catch(_){} renderRes(); });
+  vista.querySelectorAll(".res-chip").forEach(b => b.onclick = () => { periodo = b.dataset.p; renderRes(); });
 
   function rango(){
     const hoyD = new Date(); const fin = isoLocal(hoyD);

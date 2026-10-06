@@ -1,5 +1,5 @@
 // Guarda la app en el teléfono para que abra sin señal. Cambiar VERSION en cada actualización.
-const VERSION='remitos-v8';
+const VERSION='remitos-v10';
 const BASE=['./','index.html','conexion.js','manifest.webmanifest','icon-192.png','icon-512.png'];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(VERSION).then(c=>c.addAll(BASE)).then(()=>self.skipWaiting()))});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==VERSION).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});
