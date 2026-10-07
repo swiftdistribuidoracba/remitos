@@ -339,7 +339,7 @@ $('tab-nuevo').onclick=()=>tab('nuevo');$('tab-hist').onclick=()=>tab('hist');
 
 // ---- escaneo
 // Códigos de otros frigoríficos que equivalen a un corte de la lista
-const EQUIV={'94088':'100523300','94096':'100523042','53536':'100522741','94085':'100523039'}; // Brasil: 94088 = COLITA CUADRIL PUL ENF · 94096 = NALGA S/T PUL ENF · 53536 = NALGA C/T PUL ENF · 94085 BIFE ANGOSTO (bife de chorizo) VP = BIFE ANGOSTO PUL ENF
+const EQUIV={'94102':'100522265','94088':'100523300','94096':'100523042','53536':'100522741','94085':'100523039'}; // Brasil: 94088 = COLITA CUADRIL PUL ENF · 94096 = NALGA S/T PUL ENF · 53536 = NALGA C/T PUL ENF · 94085 BIFE ANGOSTO (bife de chorizo) VP = BIFE ANGOSTO PUL ENF · 94102 PECETO VP = PECETO PUL ENF
 function parse(raw){
   // sacar el prefijo de símbolo que agregan algunos lectores (]C1, ]d2, ]Q3, ]e0…) antes de quedarnos con los números
   const s=String(raw).replace(/^\s*\][A-Za-z]\d/,'').replace(/\D/g,'');
@@ -353,7 +353,12 @@ function parse(raw){
   if(m){const kg=parseInt(m[2],10)/1000;if(kg>0&&kg<100)return {raw:s,code:m[1],kg:Math.round(kg*1000)/1000}}
   // 2) Brasil (etiqueta "PESO NETO (kg)", 46 dígitos): 28 + … + caja (5) + producto (5) + 01 + peso neto en centésimos (5) + fecha (8) + … + tara (6)
   // 46 dígitos (Nalga, Bife) o 48 (Colita: tara más larga); producto y peso siempre en la misma posición
-  const br=t=>{if(t.length<44||t.length>50||!t.startsWith('28'))return null;const prod=t.slice(17,22),kg=parseInt(t.slice(24,29),10)/100;
+  // el producto puede venir corrido 1–2 lugares (etiquetas de 49 dígitos, ej. Peceto 94102): se ubica buscando "01" + peso + fecha de embalaje válida
+  const fechaOk=f=>{const d=+f.slice(0,2),m=+f.slice(2,4),y=+f.slice(4,8);return d>=1&&d<=31&&m>=1&&m<=12&&y>=2020&&y<=2040};
+  const br=t=>{if(t.length<44||t.length>52||!t.startsWith('28'))return null;
+    for(const i of [17,18,16,19]){if(t.slice(i+5,i+7)!=='01'||!fechaOk(t.slice(i+12,i+20)))continue;
+      const prod=t.slice(i,i+5),kg=parseInt(t.slice(i+7,i+12),10)/100;if(kg>0&&kg<100)return {raw:t,code:EQUIV[prod]||prod,kg:Math.round(kg*100)/100,origenCod:prod}}
+    const prod=t.slice(17,22),kg=parseInt(t.slice(24,29),10)/100;
     return kg>0&&kg<100?{raw:t,code:EQUIV[prod]||prod,kg:Math.round(kg*100)/100,origenCod:prod}:null};
   let b=br(s);if(b)return b;
   for(let i=1;i<=3&&!b;i++)b=br(s.slice(i));   // lector que agrega 1–3 números al principio
