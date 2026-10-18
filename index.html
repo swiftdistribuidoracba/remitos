@@ -552,7 +552,7 @@ function renderChips(){
 $('verTodos').onclick=()=>{todos=!todos;renderChips()};
 function addKg(){const kg=parseFloat(($('kg').value||'').replace(/\s/g,'').replace(',','.'));
   if(!corteSel){flash('Tocá primero el corte.',true);return}
-  if(!(kg>0&&kg<200)){flash('Escribí los kilos del PESO NETO, por ejemplo 20,188.',true);return}
+  if(!(kg>0&&kg<1000)){flash('Escribí los kilos del PESO NETO, por ejemplo 20,188.',true);return}
   cajas.push({raw:'manual',code:corteSel,kg:Math.round(kg*1000)/1000,dup:false});$('kg').value='';render();$('kg').focus()}
 $('addKg').onclick=addKg;
 $('kg').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();addKg()}});
