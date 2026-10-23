@@ -203,11 +203,11 @@ details summary{cursor:pointer;color:var(--muted);font-size:14px}
     <section class="card">
       <div class="step"><b>2</b><h2>Cajas</h2></div>
       <div class="modes" role="tablist">
-        <button class="mode" id="m-foto" aria-selected="true">Foto de la etiqueta</button>
+        <button class="mode" id="m-foto" aria-selected="false" hidden>Foto de la etiqueta</button>
         <button class="mode" id="m-kg" aria-selected="false">Corte + kilos a mano</button>
         <button class="mode" id="m-lec" aria-selected="false">Lector de códigos</button>
       </div>
-      <div id="p-foto" class="panel">
+      <div id="p-foto" class="panel" hidden>
         <div class="camera tap"><span class="cam-t">Sacar foto de la etiqueta</span><span class="cam-s">Acercate al código de barras de la etiqueta (que ocupe casi todo el ancho): de ahí salen el corte y el PESO NETO.</span>
           <input id="foto" type="file" accept="image/*" capture="environment" aria-label="Sacar foto de la etiqueta"></div>
         <div class="galeria tap">¿No se abre la cámara? Tocá acá para elegir la foto
@@ -392,7 +392,7 @@ function addRaw(txt){
 }
 
 // ---- modos de ingreso
-function modo(m){if(!['kg','lec'].includes(m))m='foto';['foto','kg','lec'].forEach(k=>{$('m-'+k).setAttribute('aria-selected',k===m);$('p-'+k).hidden=k!==m});try{localStorage.setItem('modo',m)}catch(_){} if(m==='lec')setTimeout(()=>$('lec').focus(),50)}
+function modo(m){if(!['kg','lec'].includes(m))m='kg';['foto','kg','lec'].forEach(k=>{$('m-'+k).setAttribute('aria-selected',k===m);$('p-'+k).hidden=k!==m});try{localStorage.setItem('modo',m)}catch(_){} if(m==='lec')setTimeout(()=>$('lec').focus(),50)}
 $('m-foto').onclick=()=>modo('foto');$('m-kg').onclick=()=>modo('kg');$('m-lec').onclick=()=>modo('lec');
 // ---- lector de códigos (Gadnic u otro que funcione como teclado)
 function lecMsg(t,ok){const m=$('lecmsg');m.textContent=t;m.style.color=ok?'var(--ok)':'var(--warn)'}
@@ -749,7 +749,7 @@ async function onFotos(e){
   oks.forEach(li=>li.remove());if(!log.children.length)log.hidden=true;
 }
 $('foto').addEventListener('change',onFotos);$('fotogal').addEventListener('change',onFotos);
-try{const m=localStorage.getItem('modo');if(m)modo(m)}catch(_){}
+try{modo(localStorage.getItem('modo'))}catch(_){modo('kg')}
 
 // ---- render cajas + remito
 function lineas(){
