@@ -773,7 +773,7 @@ function render(){
   const L=lineas();
   $('boxcount').textContent=cajas.length?`${cajas.length} caja(s) · ${fkg(cajas.reduce((a,c)=>a+c.kg,0))} kg en total`:'';
   $('lines').innerHTML=L.map(l=>`<tr><td class="num">${fkg(l.kg)}</td><td>${l.nombre} (${l.cajas} ${l.cajas>1?'cajas':'caja'})${l.deLista?'<div class="aviso info">Precio de lista (el cliente no tenía precio para este corte)</div>':''}${l.bajo?`<div class="aviso bajo">⚠ Debajo de costo + $ ${fmt(MARGEN)}: costo $ ${fmt(l.costo)} · mínimo $ ${fmt(l.costo+MARGEN)}</div>`:''}</td><td class="num">$ <input class="price" inputmode="numeric" data-c="${l.pk}" value="${l.precio}" aria-label="Precio ${l.nombre}"></td><td class="num">${l.total?'$ '+fmt(l.total):'—'}</td></tr>`).join('')||'<tr><td colspan="4" style="color:var(--muted)">Las líneas del remito se arman solas al escanear las cajas.</td></tr>';
-  $('lines').querySelectorAll('input.price').forEach(inp=>inp.onchange=()=>{const v=parseInt(inp.value.replace(/\D/g,''),10);if(v>0)precios[inp.dataset.c]=v;else delete precios[inp.dataset.c];const ln=lineas().find(x=>x.pk===inp.dataset.c||x.key===inp.dataset.c);if(ln&&ln.desc&&v>0)precios[ln.key]=v;setTimeout(render,0)});
+  $('lines').querySelectorAll('input.price').forEach(inp=>{inp.oninput=()=>{const v=parseInt(inp.value.replace(/\D/g,''),10);if(v>0)precios[inp.dataset.c]=v};inp.onchange=()=>{const v=parseInt(inp.value.replace(/\D/g,''),10);if(v>0)precios[inp.dataset.c]=v;else delete precios[inp.dataset.c];const ln=lineas().find(x=>x.pk===inp.dataset.c||x.key===inp.dataset.c);if(ln&&ln.desc&&v>0)precios[ln.key]=v;setTimeout(render,0)}});
   $('total').textContent=fmt(L.reduce((a,l)=>a+l.total,0));
   try{localStorage.setItem('borrador',JSON.stringify({cajas,cliente:$('cliente').value,fecha:$('fecha').value,precios,dia:hoy()}))}catch(_){}
 }
@@ -784,7 +784,7 @@ render();renderChips();
 function renderClientes(){
   const sel=$('cliente'),cur=sel.value;
   const opts=Object.entries(clientes).sort((a,b)=>a[1].nombre.localeCompare(b[1].nombre)).map(([id,c])=>`<option value="${id}">${c.nombre}</option>`).join('');
-  sel.innerHTML='<option value="">Elegí un cliente…</option>'+opts; if(cur&&clientes[cur])sel.value=cur;
+  sel.innerHTML='<option value="">Elegí un cliente…</option>'+opts; if(cur&&clientes[cur]){sel.value=cur;if(showCliente.ult===cur)return}
   else if(window.__borrador&&clientes[window.__borrador.cliente]){sel.value=window.__borrador.cliente;showCliente();precios={...precios,...(window.__borrador.precios||{})};window.__borrador=null;render();return}
   showCliente();
 }
@@ -1093,7 +1093,7 @@ $('corrcancel').onclick=()=>{$('nuevo').click()};
   db.collection('costos').onSnapshot(s=>{COSTOS={};s.docs.forEach(d=>{const x=d.data();if(x&&x.costo)COSTOS[d.id]=x});render()},()=>{});
   db.doc('meta/lista').onSnapshot(s=>{LISTA=(s.exists&&s.data().precios)||{};render()},()=>{});
   db.collection('productos').onSnapshot(s=>{s.docs.forEach(d=>{const x=d.data()||{};if(x.equiv){EQUIV[d.id]=x.equiv;cajas.forEach(c=>{if(c.code===d.id)c.code=x.equiv})}else if(x.nombre)PRODUCTOS[d.id]=x.nombre});render();renderChips()},()=>{});
-  db.collection('clientes').onSnapshot(s=>{clientes={};s.docs.forEach(d=>clientes[d.id]=d.data());renderClientes()},e=>{$('dbmsg').hidden=false;$('dbmsg').textContent='No se pudo leer la lista de clientes ('+e.code+').'});
+  db.collection('clientes').onSnapshot(s=>{if(!s.docs.length&&Object.keys(clientes).length)return;clientes={};s.docs.forEach(d=>clientes[d.id]=d.data());renderClientes()},e=>{$('dbmsg').hidden=false;$('dbmsg').textContent='No se pudo leer la lista de clientes ('+e.code+').'});
   db.collection('remitos').orderBy('creado','desc').limit(200).onSnapshot(s=>{remitos=s.docs.map(d=>d.data());renderHist()},()=>{});
 })();
 </script>

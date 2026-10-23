@@ -35,7 +35,7 @@
   let S=ls.get('swift_cache')||{clientes:{},productos:{},costos:{},remitos:{},pedidos:{},meta:{contador:{n:0},lista:{precios:{}},pedidoClientes:{mapa:{}}}};
   S.pedidos=S.pedidos||{};S.meta.pedidoClientes=S.meta.pedidoClientes||{mapa:{}};
   let cola=ls.get('swift_cola')||[];            // cambios pendientes de subir
-  const guardarCache=()=>ls.set('swift_cache',S), guardarCola=()=>{ls.set('swift_cola',cola);estado()};
+  const guardarCache=()=>{try{localStorage.setItem('swift_cache',JSON.stringify(S))}catch(_){try{const r={};Object.keys(S.remitos||{}).forEach(k=>{const x=Object.assign({},S.remitos[k]);delete x.firma;r[k]=x});localStorage.setItem('swift_cache',JSON.stringify(Object.assign({},S,{remitos:r})))}catch(_){try{localStorage.setItem('swift_cache',JSON.stringify(Object.assign({},S,{remitos:{}})))}catch(_){}}}}, guardarCola=()=>{ls.set('swift_cola',cola);estado()};
   const subs=[];                                // {tipo:'col'|'doc', ruta, fn}
   const snapDoc=(col,id)=>({id,exists:!!(S[col]&&S[col][id]),data:()=>S[col]&&S[col][id],metadata:{}});
   function avisar(){subs.forEach(s=>{try{
