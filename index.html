@@ -243,6 +243,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:14px}
       </table></div>
       <div class="total">TOTAL $ <span id="total" class="mono">0</span></div>
       <label style="flex-direction:row;align-items:center;gap:8px;color:var(--ink)"><input type="checkbox" id="guardarPrecios" checked style="width:auto"> Guardar estos precios para este cliente</label>
+      <label style="flex-direction:row;align-items:center;gap:8px;color:var(--ink)"><input type="checkbox" id="terceros" style="width:auto"> Entrega para terceros (numeración T, no suma en mis ventas)</label>
     </section>
 
     <section class="card">
@@ -363,6 +364,8 @@ function parse(raw){
   let b=br(s);if(b)return b;
   for(let i=1;i<=3&&!b;i++)b=br(s.slice(i));   // lector que agrega 1–3 números al principio
   if(b)return b;
+  // 2b) Brasil con producto de 9 dígitos (ej. Pecho en trozos VP 500102521): producto (9) + 01 + peso (5, centésimos) + fecha. Solo si el producto tiene equivalencia
+  for(const i of [18,17,19,16,20]){if(s.length<44||s.length>56)break;const prod=s.slice(i,i+9);if(!EQUIV[prod]||s.slice(i+9,i+11)!=='01'||!fechaOk(s.slice(i+16,i+24)))continue;const kg=parseInt(s.slice(i+11,i+16),10)/100;if(kg>0&&kg<100)return {raw:s,code:EQUIV[prod],kg:Math.round(kg*100)/100,origenCod:prod}}
   // 3) GS1-128 (estándar internacional): (01) GTIN 14 + (310x) peso neto kg con x decimales
   const g=gs1(String(raw));
   if(g&&g.kg){const prod=g.gtin.slice(-6,-1);return {raw:s,code:EQUIV[g.gtin]||EQUIV[prod]||g.gtin,kg:g.kg,origenCod:g.gtin}}
@@ -1032,10 +1035,10 @@ async function guardarRemito(conFirma){
       numero=editando.numero;firma=firmado?firmaPNG():(editando.firma||null);
       extra={creado:editando.creado,corregido:new Date().toISOString(),cargado:false};
     }else{
-      numero=await window.nuevoNumeroRemito();firma=firmado?firmaPNG():null;
+      numero=await window.nuevoNumeroRemito($('terceros').checked?'T':null);firma=firmado?firmaPNG():null;
       extra={creado:new Date().toISOString(),cargado:false};
     }
-    await db.collection('remitos').doc(numero).set({...d,numero,firma,sinFirma:!firma,...extra});
+    await db.collection('remitos').doc(numero).set({...d,numero,firma,sinFirma:!firma,...extra,...(String(numero).startsWith('T-')?{tercero:true}:{})});
     if(editando)salirCorreccion();
     if($('guardarPrecios').checked){const v=clientes[d.clienteId];const c={...v,precios:{...(v.precios||{}),...Object.fromEntries(d.items.map(i=>[i.key||i.code,i.precio]))}};clientes[d.clienteId]=c;await db.doc('clientes/'+d.clienteId).set(c)}
     if(window.__pedidoListo)await window.__pedidoListo(numero);
@@ -1047,7 +1050,7 @@ async function guardarRemito(conFirma){
 $('guardar').onclick=()=>guardarRemito(true);
 $('guardarSF').onclick=async()=>{if(firmado&&!await preguntar({titulo:'Hay una firma dibujada',texto:'¿Guardar el remito con esa firma?',si:'Guardar con firma'}))return;guardarRemito(false)};
 $('pdf').onclick=async()=>{const d=datosRemito();const err=validar(d,false);if(err){flash(err,true);return}await mostrarRemito(d,guardadoId||'BORRADOR',firmado?firmaPNG():null)};
-$('nuevo').onclick=()=>{salirCorreccion();cajas=[];$('cliente').value='';showCliente();precios={};$('lecmsg').textContent='';$('fotolog').innerHTML='';$('fotomsg').hidden=true;$('fotolog').hidden=true;$('kg').value='';corteSel=null;renderChips();$('rv').hidden=true;guardadoId=null;$('recibe').value='';$('dni').value='';$('obs').value='';$('borrarFirma').click();$('fecha').value=hoy();render();window.scrollTo({top:0})};
+$('nuevo').onclick=()=>{salirCorreccion();$('terceros').checked=false;cajas=[];$('cliente').value='';showCliente();precios={};$('lecmsg').textContent='';$('fotolog').innerHTML='';$('fotomsg').hidden=true;$('fotolog').hidden=true;$('kg').value='';corteSel=null;renderChips();$('rv').hidden=true;guardadoId=null;$('recibe').value='';$('dni').value='';$('obs').value='';$('borrarFirma').click();$('fecha').value=hoy();render();window.scrollTo({top:0})};
 
 // ---- historial
 function renderHist(){
@@ -1300,7 +1303,7 @@ function iniciarPedidos(){
   renderProg();
 }
 
-iniciarPedidos();
+// iniciarPedidos(); // Pedidos escondido a pedido de Gabriel (24/10)
 </script>
 
 <style>
@@ -1459,7 +1462,7 @@ iniciarPedidos();
     if (vista.hidden) return;
     vista.querySelectorAll(".res-chip").forEach(b => b.setAttribute("aria-pressed", b.dataset.p === periodo));
     const R = rango();
-    const lista = remitos.filter(r => !r.anulado && r.fecha >= R.desde && r.fecha <= R.hasta);
+    const lista = remitos.filter(r => !r.anulado && !String(r.numero||'').startsWith('T-') && r.fecha >= R.desde && r.fecha <= R.hasta);
     const total = lista.reduce((a,r) => a + (r.total||0), 0);
     let kilos = 0; const porCorte = {}, porCli = {}, porDia = {};
     lista.forEach(r => {

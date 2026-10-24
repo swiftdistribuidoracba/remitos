@@ -95,8 +95,8 @@
     }}
   };
   // número de remito: lo da la planilla, así nunca se repite entre equipos
-  window.nuevoNumeroRemito=async()=>{if(!navigator.onLine)throw {code:'sin_senal',message:'Sin señal: el número de remito lo da la planilla. Guardalo cuando vuelva la señal (lo cargado no se pierde).'};
-    await subir();const j=await api('nuevoNumero');S.meta.contador={n:j.n};guardarCache();return j.numero};
+  window.nuevoNumeroRemito=async(serie)=>{if(!navigator.onLine)throw {code:'sin_senal',message:'Sin señal: el número de remito lo da la planilla. Guardalo cuando vuelva la señal (lo cargado no se pierde).'};
+    await subir();const j=await api('nuevoNumero',serie?{serie}:undefined);if(!serie)S.meta.contador={n:j.n};guardarCache();return j.numero};
 
   // descargar archivos (PDF / JPG) directo en el teléfono
   const downloads={async save({filename,data}){const u=URL.createObjectURL(data);const a=document.createElement('a');a.href=u;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),5000)}};
