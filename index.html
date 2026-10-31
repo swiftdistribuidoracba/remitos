@@ -1378,6 +1378,7 @@ function iniciarPedidos(){
       </div>
       <div class="res-tiles" id="res-tiles"></div>
     </section>
+    <section class="card"><h2 class="res-h">Comparativa por mes</h2><p class="res-sub">Total vendido por mes (junio a septiembre de la planilla anterior; desde octubre, de la app). Sin anulados ni entregas para terceros.</p><div class="res-chart" id="res-meses"></div></section>
     <section class="card"><h2 class="res-h">Ventas por día</h2><p class="res-sub" id="res-dia-sub"></p><div class="res-chart" id="res-dia"></div></section>
     <section class="card"><h2 class="res-h">Kilos por corte</h2><p class="res-sub">Los cortes que más salieron en el período.</p><div class="res-chart" id="res-cortes"></div></section>
     <section class="card"><h2 class="res-h">Mejores clientes</h2><p class="res-sub">Total vendido a cada cliente en el período.</p><div class="res-chart" id="res-cli"></div></section>
@@ -1478,6 +1479,15 @@ function iniciarPedidos(){
       + `<div class="res-tile"><span class="k">Remitos</span><span class="v">${lista.length}</span></div>`
       + `<div class="res-tile${nSin?" alerta":""}"><span class="k">${nSin?"⚠ ":""}Sin firmar (todos)</span><span class="v">${nSin}</span>${nSin?'<button class="btn small" id="res-verfir">Ver</button>':""}</div>`;
     const bf = $("res-verfir"); if (bf) bf.onclick = verSinFirmar;
+
+    // ---- comparativa por mes (Gabriel, 30/10): jun–sep de la planilla anterior, desde octubre de la app
+    const HIST = {"2026-06":{v:11126463,kg:740.26,n:17},"2026-07":{v:43004878,kg:2775.91,n:36},"2026-08":{v:56742592,kg:3605.71,n:47},"2026-09":{v:71968038,kg:4642.1,n:49}};
+    const MESES = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+    const porMes = {...HIST};
+    remitos.filter(r => !r.anulado && !String(r.numero||'').startsWith('T-') && String(r.fecha||'') >= "2026-10-01").forEach(r => { const m = String(r.fecha).slice(0,7); const o = porMes[m] = porMes[m] || {v:0,kg:0,n:0}; o.v += (r.total||0); o.n++; (r.items||[]).forEach(it => o.kg += (+it.kg||0)); });
+    const mesAct = isoLocal(new Date()).slice(0,7), ks = Object.keys(porMes).sort();
+    barrasH($("res-meses"), ks.map((m,i) => { const o = porMes[m], prev = i ? porMes[ks[i-1]].v : 0, pct = prev ? Math.round((o.v/prev-1)*100) : null;
+      return {k: MESES[+m.slice(5,7)-1]+" "+m.slice(0,4)+(m===mesAct?" (en curso)":""), v:o.v, extra: kgf(o.kg)+" kg · "+o.n+" entregas"+(pct===null?"":" · "+(pct>=0?"+":"")+pct+"%")}; }), v => corto(v));
 
     const diaBox = $("res-dia");
     if (periodo === "hoy"){ $("res-dia-sub").textContent = "Elegí 7 días o Este mes para ver la evolución."; diaBox.innerHTML = ""; }
