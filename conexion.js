@@ -94,6 +94,8 @@
       async delete(){if(S[col])delete S[col][id];guardarCache();avisar();encolar({col,id,tipo:'borrar'})}
     }}
   };
+  // firma de un remito viejo (no viene en 'todo' para que la app abra rápido)
+  window.firmaRemito=async n=>{try{const j=await api('firma',{numero:n});return j.firma||null}catch(_){return null}};
   // número de remito: lo da la planilla, así nunca se repite entre equipos
   window.nuevoNumeroRemito=async(serie)=>{if(!navigator.onLine)throw {code:'sin_senal',message:'Sin señal: el número de remito lo da la planilla. Guardalo cuando vuelva la señal (lo cargado no se pierde).'};
     await subir();const j=await api('nuevoNumero',serie?{serie}:undefined);if(!serie)S.meta.contador={n:j.n};guardarCache();return j.numero};

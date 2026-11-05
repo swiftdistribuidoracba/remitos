@@ -990,6 +990,7 @@ async function remitoJPG(d,numero,firma){
 }
 let vista=null;
 async function mostrarRemito(d,numero,firma){
+  if(firma==='srv')firma=await window.firmaRemito(numero); // firmas viejas: se piden al servidor solo cuando hacen falta
   const blob=await remitoJPG(d,numero,firma);if(vista&&vista.url)URL.revokeObjectURL(vista.url);
   vista={d,numero,firma,blob,url:URL.createObjectURL(blob)};
   $('rv-img').src=await new Promise(r=>{const fr=new FileReader();fr.onload=()=>r(fr.result);fr.readAsDataURL(blob)});$('rv-ayuda').hidden=true;$('rv-wa').href=linkWA(vista);$('rv-wa').textContent=vista.d.cliente.tel?'Mandar el detalle por WhatsApp a '+vista.d.cliente.nombre:'Mandar el detalle por WhatsApp';$('rv-tit').textContent=`Remito ${numero} · ${d.cliente.nombre}`;$('rv').hidden=false;
@@ -1010,6 +1011,7 @@ function linkWA(v){const d=v.d;const txt=`Remito ${v.numero} - ${d.cliente.nombr
   const tel=telWA(d.cliente.tel);return 'https://wa.me/'+(tel||'')+'?text='+encodeURIComponent(txt)}
 
 async function descargar(d,numero,firma){
+  if(firma==='srv')firma=await window.firmaRemito(numero);
   const dl=await claude.use('downloads');
   if(!window.jspdf){flash('No se pudo cargar el generador de PDF. Revisá la conexión y recargá la página.',true);return}
   const p=pdfRemito(d,numero,firma); const blob=p.output('blob');
