@@ -76,7 +76,7 @@ table.rem td{border-bottom:1px solid var(--line);padding:7px 8px;vertical-align:
 table.rem td.num,table.rem th.num{text-align:right;font-family:var(--f-mono);font-variant-numeric:tabular-nums;white-space:nowrap}
 table.rem input.price{width:96px;text-align:right;padding:6px 8px;font-family:var(--f-mono)}
 .aviso{font-size:12.5px;margin-top:3px;line-height:1.3}
-.aviso.bajo{color:var(--warn);font-weight:600}
+.aviso.bajo{color:var(--brand);background:var(--brand-soft);border-radius:6px;padding:3px 6px;margin-top:3px;font-weight:700}
 .aviso.info{color:var(--muted)}
 .total{display:flex;justify-content:flex-end;align-items:baseline;gap:12px;font:700 26px var(--f-display);color:var(--brand)}
 .total span{font:500 22px var(--f-mono);color:var(--ink)}
@@ -316,21 +316,14 @@ details summary{cursor:pointer;color:var(--muted);font-size:14px}
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>
-const PRODUCTOS={
- "100520426":"ASADO 11C CONG","100523307":"ASADO 5C CONG","100523036":"BIFE ANCHO PUL ENF","100523039":"BIFE ANGOSTO PUL ENF",
- "100010005":"BIFE ANGOSTO NAC ENF","100010009":"BOLA DE LOMO NAC ENF","100522602":"BOLA DE LOMO PUL ENF","100027726":"BONDIOLA CERDO",
- "100010655":"CARNAZA PALETA NAC ENF","100010004":"COLITA CUADRIL NAC ENF","100523041":"CORAZON CUADRIL PUL ENF","100010103":"CUADRADA NAC ENF",
- "100522266":"CUADRADA PUL ENF","100011563":"CUADRADA FETEADA NAC ENF","100010689":"ENTRAÑA NAC ENF","100517635":"LOMO NAC ENF",
- "100523040":"LOMO PUL ENF","100517143":"MATAMBRE BLACK CONG","100520272":"MATAMBRE BLACK CONG","100010546":"MATAMBRE NAC ENF","100012915":"MATAMBRE CONG",
- "100016121":"MOLLEJA CONG","100016120":"MOLLEJA CORAZON CONG","100522741":"NALGA C/T PUL ENF","100523042":"NALGA S/T PUL ENF","100523300":"COLITA CUADRIL PUL ENF",
- "100012202":"NALGA S/T NAC ENF","100522265":"PECETO PUL ENF","100523153":"PECHO PUL ENF","100523149":"AGUJA PUL ENF",
- "100010818":"ROAST BEEF NAC ENF","100010839":"TAPA DE ASADO NAC ENF","100010001":"VACÍO NAC ENF","100517915":"CARNE PICADA","100013155":"VACÍO L ENF","100010432":"VACÍO NAC CONG"};
+const PRODUCTOS={}; // nombres: hoja Productos de la planilla (maestro, 14/11)
 const $=id=>document.getElementById(id);
 const fmt=n=>Math.round(n).toLocaleString('es-AR');
 const fkg3=n=>n.toLocaleString('es-AR',{minimumFractionDigits:3,maximumFractionDigits:3});
 const fkg=n=>n.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
 let db=null, clientes={}, cajas=[], precios={}, remitos=[], guardadoId=null, COSTOS={}, LISTA={}, editando=null;
 const MARGEN=2000; // costo c/IVA + $2.000, igual que la planilla
+const minimo=costo=>Math.ceil((costo+MARGEN)/100)*100; // regla de Gabriel: redondeado HACIA ARRIBA a la centena
 const hoy=()=>{const d=new Date();d.setMinutes(d.getMinutes()-d.getTimezoneOffset());return d.toISOString().slice(0,10)};
 $('fecha').value=hoy();
 
@@ -344,7 +337,7 @@ $('tab-nuevo').onclick=()=>tab('nuevo');$('tab-hist').onclick=()=>tab('hist');
 
 // ---- escaneo
 // Códigos de otros frigoríficos que equivalen a un corte de la lista
-const EQUIV={'94102':'100522265','94088':'100523300','94096':'100523042','53536':'100522741','94085':'100523039'}; // Brasil: 94088 = COLITA CUADRIL PUL ENF · 94096 = NALGA S/T PUL ENF · 53536 = NALGA C/T PUL ENF · 94085 BIFE ANGOSTO (bife de chorizo) VP = BIFE ANGOSTO PUL ENF · 94102 PECETO VP = PECETO PUL ENF
+const EQUIV={}; // equivalencias: hoja Productos, columna equiv (14/11)
 function parse(raw){
   // sacar el prefijo de símbolo que agregan algunos lectores (]C1, ]d2, ]Q3, ]e0…) antes de quedarnos con los números
   const s=String(raw).replace(/^\s*\][A-Za-z]\d/,'').replace(/\D/g,'');
@@ -765,7 +758,7 @@ function lineas(){
   return Object.values(g).map(l=>{const kg=Math.round(l.kg*100)/100;
     const pk=l.desc?(precios[l.key]!=null||!l.code?l.key:l.code):l.code; // la clave donde se guarda el precio
     let p=precios[pk]??'',deLista=false;if(p===''&&l.code&&LISTA[l.code]){p=LISTA[l.code];deLista=true}
-    const cs=l.code&&COSTOS[l.code];const bajo=!!(cs&&p&&p<cs.costo+MARGEN);
+    const cs=l.code&&COSTOS[l.code];const bajo=!!(cs&&p&&p<minimo(cs.costo));
     return{...l,pk,kg,nombre:l.desc||PRODUCTOS[l.code]||('CÓDIGO '+l.code),precio:p,deLista,costo:cs?cs.costo:null,bajo,total:p?Math.round(kg*p):0}}).sort((a,b)=>a.nombre.localeCompare(b.nombre));
 }
 function render(){
@@ -780,7 +773,7 @@ function render(){
   $('boxes').querySelectorAll('.x').forEach(b=>b.onclick=()=>{cajas.splice(+b.dataset.i,1);cajas.forEach((c,i)=>c.dup=cajas.slice(0,i).some(d=>d.raw===c.raw&&c.raw!=='manual'));render()});
   const L=lineas();
   $('boxcount').textContent=cajas.length?`${cajas.length} caja(s) · ${fkg(cajas.reduce((a,c)=>a+c.kg,0))} kg en total`:'';
-  $('lines').innerHTML=L.map(l=>`<tr><td class="num">${fkg(l.kg)}</td><td>${l.nombre} (${l.cajas} ${l.cajas>1?'cajas':'caja'})${l.deLista?'<div class="aviso info">Precio de lista (el cliente no tenía precio para este corte)</div>':''}${l.bajo?`<div class="aviso bajo">⚠ Debajo de costo + $ ${fmt(MARGEN)}: costo $ ${fmt(l.costo)} · mínimo $ ${fmt(l.costo+MARGEN)}</div>`:''}</td><td class="num">$ <input class="price" inputmode="numeric" data-c="${l.pk}" value="${l.precio}" aria-label="Precio ${l.nombre}"></td><td class="num">${l.total?'$ '+fmt(l.total):'—'}</td></tr>`).join('')||'<tr><td colspan="4" style="color:var(--muted)">Las líneas del remito se arman solas al escanear las cajas.</td></tr>';
+  $('lines').innerHTML=L.map(l=>`<tr><td class="num">${fkg(l.kg)}</td><td>${l.nombre} (${l.cajas} ${l.cajas>1?'cajas':'caja'})${l.deLista?'<div class="aviso info">Precio de lista (el cliente no tenía precio para este corte)</div>':''}${l.bajo?`<div class="aviso bajo">⚠ PRECIO BAJO EL MÍNIMO: mínimo $ ${fmt(minimo(l.costo))} (costo $ ${fmt(l.costo)} + $ ${fmt(MARGEN)})</div>`:''}</td><td class="num">$ <input class="price" inputmode="numeric" data-c="${l.pk}" value="${l.precio}" aria-label="Precio ${l.nombre}"></td><td class="num">${l.total?'$ '+fmt(l.total):'—'}</td></tr>`).join('')||'<tr><td colspan="4" style="color:var(--muted)">Las líneas del remito se arman solas al escanear las cajas.</td></tr>';
   $('lines').querySelectorAll('input.price').forEach(inp=>{inp.oninput=()=>{const v=parseInt(inp.value.replace(/\D/g,''),10);if(v>0)precios[inp.dataset.c]=v};inp.onchange=()=>{const v=parseInt(inp.value.replace(/\D/g,''),10);if(v>0)precios[inp.dataset.c]=v;else delete precios[inp.dataset.c];const ln=lineas().find(x=>x.pk===inp.dataset.c||x.key===inp.dataset.c);if(ln&&ln.desc&&v>0)precios[ln.key]=v;setTimeout(render,0)}});
   $('total').textContent=fmt(L.reduce((a,l)=>a+l.total,0));
   try{localStorage.setItem('borrador',JSON.stringify({cajas,cliente:$('cliente').value,fecha:$('fecha').value,precios,dia:hoy()}))}catch(_){}
@@ -809,8 +802,8 @@ let pcTmp={};
 function nombrePrecio(k){return k.startsWith('d:')?k.slice(2):(PRODUCTOS[k]||('Código '+k))}
 function renderPC(){
   const ks=Object.keys(pcTmp).sort((a,b)=>nombrePrecio(a).localeCompare(nombrePrecio(b)));
-  $('pc-lista').innerHTML=ks.map(k=>{const cs=COSTOS[k];const bajo=cs&&pcTmp[k]&&pcTmp[k]<cs.costo+MARGEN;
-    return `<div class="pcrow"><span>${nombrePrecio(k)}${LISTA[k]?`<div class="sub">lista $ ${fmt(LISTA[k])}${cs?' · costo $ '+fmt(cs.costo):''}</div>`:cs?`<div class="sub">costo $ ${fmt(cs.costo)}</div>`:''}${bajo?'<div class="aviso bajo">⚠ debajo de costo + $ '+fmt(MARGEN)+'</div>':''}</span><input inputmode="numeric" data-k="${k}" value="${pcTmp[k]||''}" aria-label="Precio ${nombrePrecio(k)}"><button class="x" data-k="${k}" aria-label="Quitar precio">×</button></div>`}).join('')||'<p class="hint">Este cliente todavía no tiene precios guardados.</p>';
+  $('pc-lista').innerHTML=ks.map(k=>{const cs=COSTOS[k];const bajo=cs&&pcTmp[k]&&pcTmp[k]<minimo(cs.costo);
+    return `<div class="pcrow"><span>${nombrePrecio(k)}${LISTA[k]?`<div class="sub">lista $ ${fmt(LISTA[k])}${cs?' · costo $ '+fmt(cs.costo):''}</div>`:cs?`<div class="sub">costo $ ${fmt(cs.costo)}</div>`:''}${bajo?'<div class="aviso bajo">⚠ bajo el mínimo ($ '+fmt(minimo(cs.costo))+')</div>':''}</span><input inputmode="numeric" data-k="${k}" value="${pcTmp[k]||''}" aria-label="Precio ${nombrePrecio(k)}"><button class="x" data-k="${k}" aria-label="Quitar precio">×</button></div>`}).join('')||'<p class="hint">Este cliente todavía no tiene precios guardados.</p>';
   $('pc-lista').querySelectorAll('input').forEach(i=>i.onchange=()=>{const v=parseInt(i.value.replace(/\D/g,''),10);if(v>0)pcTmp[i.dataset.k]=v;renderPC()});
   $('pc-lista').querySelectorAll('.x').forEach(b=>b.onclick=()=>{delete pcTmp[b.dataset.k];renderPC()});
   $('pc-nuevo').innerHTML='<option value="">Elegí un corte…</option>'+Object.keys(PRODUCTOS).filter(k=>!(k in pcTmp)).sort((a,b)=>PRODUCTOS[a].localeCompare(PRODUCTOS[b])).map(k=>`<option value="${k}">${PRODUCTOS[k]}</option>`).join('');
@@ -1032,7 +1025,7 @@ async function guardarRemito(conFirma){
   const reps=cajas.filter(c=>c.dup||(c.raw&&!['manual','foto'].includes(c.raw)&&cajas.filter(o=>o.raw===c.raw).length>1));
   if(reps.length&&!await preguntar({titulo:'Cajas repetidas',texto:'La misma etiqueta está cargada más de una vez. ¿Guardar igual?',si:'Guardar igual'}))return;
   const bajos=lineas().filter(l=>l.bajo);
-  if(bajos.length&&!await preguntar({titulo:'Precio por debajo del costo',si:'Guardar igual',texto:'Debajo de costo + $ '+fmt(MARGEN)+':\n'+bajos.map(l=>`${l.nombre}: $ ${fmt(l.precio)} (mínimo $ ${fmt(l.costo+MARGEN)})`).join('\n')+'\n\n¿Guardar igual?'}))return;
+  if(bajos.length&&!await preguntar({titulo:'⚠ Precio bajo el mínimo',si:'Guardar igual',peligro:true,texto:'Estos cortes quedan por debajo del mínimo (costo + $ '+fmt(MARGEN)+', redondeado a la centena):\n'+bajos.map(l=>`${l.nombre}: $ ${fmt(l.precio)} (mínimo $ ${fmt(minimo(l.costo))})`).join('\n')+'\n\n¿Guardar igual?'}))return;
   if(!editando){const igual=remitos.find(r=>!r.anulado&&r.clienteId===d.clienteId&&r.fecha===d.fecha&&r.total===d.total);
     if(igual&&!await preguntar({titulo:'¿Remito repetido?',texto:`Ya guardaste el remito ${igual.numero} para ${d.cliente.nombre} hoy, con el mismo total ($ ${fmt(d.total)}). ¿Guardar otro igual?`,si:'Guardar otro'}))return}
   $('guardar').disabled=$('guardarSF').disabled=true;
@@ -1063,7 +1056,7 @@ $('nuevo').onclick=()=>{salirCorreccion();$('terceros').checked=false;cajas=[];$
 function renderHist(){
   if(!remitos.length){$('hist').innerHTML='<div class="empty">Todavía no hay remitos guardados. Cuando guardes el primero, aparece acá con su estado de carga en la planilla.</div>';return}
   $('hist').innerHTML=remitos.map((r,i)=>`<div class="hitem${r.anulado?' anul':''}"><div><div class="t">${r.numero} · ${r.cliente?.nombre||''}</div><div class="s">${(r.fecha||'').split('-').reverse().join('/')} · ${r.items?.length||0} corte(s) · recibió ${r.recibe||'—'}${r.corregido?' · corregido':''}${r.anulado?' · anulado: '+(r.motivo||''):''}</div></div>
-   <div class="r"><div class="mono">$ ${fmt(r.total||0)}</div><div class="hacc">${r.anulado?'<span class="pill warn">Anulado</span>':(r.firma?'<span class="pill ok">✓ Firmado</span>':'<span class="pill warn">Sin firmar</span>')+(r.cargado?'<span class="pill ok">En planilla</span>':'<span class="pill pend">Sin cargar</span>')}${!r.anulado&&!r.firma?`<button class="btn small" data-a="fir" data-i="${i}">Firmar</button>`:''}<button class="btn ghost small" data-a="ver" data-i="${i}">Ver</button>${r.anulado||r.cargado?'':`<button class="btn ghost small" data-a="cor" data-i="${i}">Corregir</button><button class="btn ghost small" data-a="anu" data-i="${i}">Anular</button>`}<button class="btn ghost small" data-a="eli" data-i="${i}">Eliminar</button></div></div></div>`).join('');
+   <div class="r"><div class="mono">$ ${fmt(r.total||0)}</div><div class="hacc">${r.anulado?'<span class="pill warn">Anulado</span>':(r.firma?'<span class="pill ok">✓ Firmado</span>':'<span class="pill warn">Sin firmar</span>')+(r.cargado?'<span class="pill ok">En planilla</span>':'<span class="pill pend">Sin cargar</span>')}${!r.anulado&&!r.firma?`<button class="btn small" data-a="fir" data-i="${i}">Firmar</button>`:''}<button class="btn ghost small" data-a="ver" data-i="${i}">Ver</button>${r.anulado||r.cargado?'':`<button class="btn ghost small" data-a="cor" data-i="${i}">Corregir</button>`}${r.anulado?'':`<button class="btn ghost small" data-a="anu" data-i="${i}">Anular</button>`}<button class="btn ghost small" data-a="eli" data-i="${i}">Eliminar</button></div></div></div>`).join('');
   $('hist').querySelectorAll('button').forEach(b=>b.onclick=()=>{const r=remitos[+b.dataset.i];
     if(b.dataset.a==='ver')mostrarRemito(r,r.numero,r.firma);
     else if(b.dataset.a==='cor')corregir(r);
@@ -1078,9 +1071,13 @@ async function eliminar(r){
   catch(e){flash('No se pudo eliminar ('+(e.code||e.message)+').',true)}
 }
 async function anular(r){
-  const motivo=await preguntar({titulo:`Anular remito ${r.numero}`,texto:`${r.cliente?.nombre||''} · $ ${fmt(r.total||0)}\nQueda en el historial como ANULADO y no se carga en la planilla.`,input:'Motivo (opcional)',si:'Anular',peligro:true});
-  if(motivo===null)return;
-  try{await db.collection('remitos').doc(r.numero).set({...r,anulado:true,motivo:motivo.trim()||'sin motivo',anuladoEl:new Date().toISOString()});flash(`Remito ${r.numero} anulado.`)}
+  let motivo='';
+  while(!motivo){
+    const m=await preguntar({titulo:`Anular remito ${r.numero}`,texto:`${r.cliente?.nombre||''} · $ ${fmt(r.total||0)}\nQueda en el historial como ANULADO y no cuenta para el saldo del cliente.${r.cargado?'\nYa está en la planilla: a la noche se borra solo de la hoja Clientes.':''}\nEscribí el motivo (obligatorio).`,input:'Motivo',si:'Anular',peligro:true});
+    if(m===null)return;
+    motivo=m.trim();if(!motivo)flash('Falta el motivo de la anulación.',true);
+  }
+  try{await db.collection('remitos').doc(r.numero).set({...r,anulado:true,motivo,anuladoEl:new Date().toISOString()});flash(`Remito ${r.numero} anulado.`)}
   catch(e){flash('No se pudo anular ('+(e.code||e.message)+').',true)}
 }
 function corregir(r){
@@ -1102,7 +1099,7 @@ $('corrcancel').onclick=()=>{$('nuevo').click()};
   if(!db){$('dbmsg').hidden=false;$('dbmsg').textContent='No hay conexión con el almacenamiento: podés armar el remito y descargar el PDF, pero no se guarda.';$('cliente').innerHTML='<option value="">Sin lista de clientes</option>';return}
   db.collection('costos').onSnapshot(s=>{COSTOS={};s.docs.forEach(d=>{const x=d.data();if(x&&x.costo)COSTOS[d.id]=x});render()},()=>{});
   db.doc('meta/lista').onSnapshot(s=>{LISTA=(s.exists&&s.data().precios)||{};render()},()=>{});
-  db.collection('productos').onSnapshot(s=>{s.docs.forEach(d=>{const x=d.data()||{};if(x.equiv){EQUIV[d.id]=x.equiv;cajas.forEach(c=>{if(c.code===d.id)c.code=x.equiv})}else if(x.nombre)PRODUCTOS[d.id]=x.nombre});render();renderChips()},()=>{});
+  db.collection('productos').onSnapshot(s=>{if(s.docs.length){Object.keys(PRODUCTOS).forEach(k=>delete PRODUCTOS[k]);Object.keys(EQUIV).forEach(k=>delete EQUIV[k])}s.docs.forEach(d=>{const x=d.data()||{};if(x.equiv){EQUIV[d.id]=x.equiv;cajas.forEach(c=>{if(c.code===d.id)c.code=x.equiv})}else if(x.nombre)PRODUCTOS[d.id]=x.nombre});render();renderChips()},()=>{});
   db.collection('clientes').onSnapshot(s=>{if(!s.docs.length&&Object.keys(clientes).length)return;clientes={};s.docs.forEach(d=>clientes[d.id]=d.data());renderClientes()},e=>{$('dbmsg').hidden=false;$('dbmsg').textContent='No se pudo leer la lista de clientes ('+e.code+').'});
   db.collection('remitos').orderBy('creado','desc').limit(200).onSnapshot(s=>{remitos=s.docs.map(d=>d.data());renderHist()},()=>{});
 })();
