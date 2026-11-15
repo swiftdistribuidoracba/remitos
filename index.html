@@ -540,8 +540,10 @@ async function pesoDeFoto(file,titulo){
 // ---- corte + kilos a mano
 let corteSel=null,todos=false;
 function renderChips(){
-  const pri=Object.keys(precios).filter(c=>PRODUCTOS[c]);
-  let list=todos||!pri.length?Object.keys(PRODUCTOS):pri;
+  // a mano solo se eligen cortes con precio de compra (factura cargada = en stock), pedido de Gabriel 14/11
+  const conCosto=c=>PRODUCTOS[c]&&COSTOS[c];
+  const pri=Object.keys(precios).filter(conCosto);
+  let list=todos||!pri.length?Object.keys(PRODUCTOS).filter(conCosto):pri;
   list=[...new Set(list)].sort((a,b)=>PRODUCTOS[a].localeCompare(PRODUCTOS[b]));
   $('chips').innerHTML=list.map(c=>`<button class="chip" data-c="${c}" aria-pressed="${c===corteSel}">${PRODUCTOS[c]}</button>`).join('');
   $('chips').querySelectorAll('.chip').forEach(b=>b.onclick=()=>{corteSel=b.dataset.c;renderChips();$('kg').focus()});
@@ -1097,7 +1099,7 @@ $('corrcancel').onclick=()=>{$('nuevo').click()};
 (async()=>{
   db=await claude.use('db');
   if(!db){$('dbmsg').hidden=false;$('dbmsg').textContent='No hay conexión con el almacenamiento: podés armar el remito y descargar el PDF, pero no se guarda.';$('cliente').innerHTML='<option value="">Sin lista de clientes</option>';return}
-  db.collection('costos').onSnapshot(s=>{COSTOS={};s.docs.forEach(d=>{const x=d.data();if(x&&x.costo)COSTOS[d.id]=x});render()},()=>{});
+  db.collection('costos').onSnapshot(s=>{COSTOS={};s.docs.forEach(d=>{const x=d.data();if(x&&x.costo)COSTOS[d.id]=x});render();renderChips()},()=>{});
   db.doc('meta/lista').onSnapshot(s=>{LISTA=(s.exists&&s.data().precios)||{};render()},()=>{});
   db.collection('productos').onSnapshot(s=>{if(s.docs.length){Object.keys(PRODUCTOS).forEach(k=>delete PRODUCTOS[k]);Object.keys(EQUIV).forEach(k=>delete EQUIV[k])}s.docs.forEach(d=>{const x=d.data()||{};if(x.equiv){EQUIV[d.id]=x.equiv;cajas.forEach(c=>{if(c.code===d.id)c.code=x.equiv})}else if(x.nombre)PRODUCTOS[d.id]=x.nombre});render();renderChips()},()=>{});
   db.collection('clientes').onSnapshot(s=>{if(!s.docs.length&&Object.keys(clientes).length)return;clientes={};s.docs.forEach(d=>clientes[d.id]=d.data());renderClientes()},e=>{$('dbmsg').hidden=false;$('dbmsg').textContent='No se pudo leer la lista de clientes ('+e.code+').'});
