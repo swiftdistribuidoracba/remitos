@@ -794,7 +794,7 @@ function renderClientes(){
 function showCliente(){
   const c=clientes[$('cliente').value];
   $('clientinfo').innerHTML=c?[c.razon&&`<span>${c.razon}</span>`,c.cuit&&`<span>CUIT ${c.cuit}</span>`,c.dir&&`<span>${c.dir}</span>`,c.tel&&`<span>Tel. ${c.tel}</span>`].filter(Boolean).join(''):'';
-  precios={}; corteSel=null; // siempre precio de lista (flyer), sin precios recordados por cliente — pedido de Gabriel 19/11 todos=false; renderChips(); render();
+  precios={}; corteSel=null; todos=false; renderChips(); render(); // siempre precio de lista (flyer), sin precios recordados por cliente — pedido de Gabriel 19/11
   $('editCli').hidden=!c;$('preciosCli').hidden=true; if(showCliente.ult!==$('cliente').value){$('editCli').open=false;$('preciosCli').open=false;showCliente.ult=$('cliente').value;llenarEdit()}
 }
 const CAMPOS=['nombre','razon','cuit','tel','dir'];
